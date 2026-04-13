@@ -1,0 +1,467 @@
+const express = require('express');
+const cors = require('cors');
+const dotenv = require('dotenv');
+
+dotenv.config();
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: '256kb' }));
+
+const PORT = Number(process.env.PORT || 8787);
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || 'v1beta';
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const AI_PROVIDER = String(process.env.AI_PROVIDER || 'auto').toLowerCase();
+const OPENAI_MODEL_CANDIDATES = [
+  OPENAI_MODEL,
+  'gpt-5.4-mini',
+  'gpt-4o-mini',
+  'gpt-4.1-mini'
+].filter((value, index, arr) => value && arr.indexOf(value) === index);
+const GEMINI_MODEL_CANDIDATES = [
+  GEMINI_MODEL,
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash-latest',
+  'gemini-1.5-flash'
+];
+
+const CLINICAL_KB = [
+  'WHO-5: 0-100, valores <=50 pueden indicar bienestar bajo y necesidad de seguimiento.',
+  'PHQ-2: 0-6, valores >=3 sugieren cribado positivo para sintomas depresivos.',
+  'GAD-2: 0-6, valores >=3 sugieren cribado positivo para sintomas ansiosos.',
+  'El objetivo es contencion, escucha activa y orientacion a ayuda profesional, no diagnostico.',
+  'Si hay ideacion autolesiva o riesgo inminente, se debe escalar a adulto responsable y servicio de emergencia local.'
+];
+
+function normalizeMinutes(value) {
+  const n = Number(value) || 45;
+  return Math.min(360, Math.max(15, Math.round(n)));
+}
+
+function normalizeRisk(value) {
+  const v = String(value || '').toLowerCase();
+  if (v === 'high') return 'high';
+  if (v === 'medium') return 'medium';
+  return 'low';
+}
+
+function detectRiskSignals(text) {
+  const normalized = String(text || '').toLowerCase();
+  const high = [
+    'me quiero morir',
+    'quiero desaparecer',
+    'hacerme daño',
+    'lastimarme',
+    'no quiero vivir',
+    'suicid'
+  ];
+  const medium = ['ansiedad', 'ataque de panico', 'no duermo', 'muy triste', 'solo', 'agotado'];
+
+  if (high.some((w) => normalized.includes(w))) return 'high';
+  if (medium.some((w) => normalized.includes(w))) return 'medium';
+  return 'low';
+}
+
+function mergeRisk(a, b) {
+  const order = { low: 0, medium: 1, high: 2 };
+  return order[a] >= order[b] ? a : b;
+}
+
+function fallbackWellbeingReply(message, risk) {
+  if (risk === 'high') {
+    return 'Gracias por decirmelo. Lo que cuentas es muy importante. No estas solo. En este momento te recomiendo buscar de inmediato a un adulto de confianza o al personal de orientacion de tu escuela. Si te sientes en peligro, llama a emergencias de tu pais ahora.';
+  }
+  if (risk === 'medium') {
+    return 'Gracias por compartirlo. Noto que estas cargando bastante. Podemos dar un paso corto ahora: respira 4-4-6 por un minuto y dime que fue lo mas dificil de hoy para ayudarte a ordenarlo.';
+  }
+  return 'Gracias por confiar en mi. Me alegra que lo compartas. Para cuidarte mejor hoy, que situacion te hizo sentir mejor y cual te costo mas?';
+}
+
+function parseProviderJson(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (_) {
+    const fenced = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
+    if (fenced && fenced[1]) {
+      try {
+        return JSON.parse(fenced[1].trim());
+      } catch (_) {
+        return null;
+      }
+    }
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(raw.slice(start, end + 1));
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+async function generateGeminiText(prompt) {
+  const payload = {
+    contents: [
+      {
+        parts: [{ text: prompt }]
+      }
+    ],
+    generationConfig: {
+      temperature: 0.2
+    }
+  };
+
+  let lastError = null;
+
+  for (const model of GEMINI_MODEL_CANDIDATES) {
+    const url = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      lastError = body;
+      continue;
+    }
+
+    const decoded = await response.json();
+    const text = decoded?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (typeof text === 'string' && text.trim()) {
+      return { text, model };
+    }
+  }
+
+  throw new Error(lastError || 'No se obtuvo respuesta valida de ningun modelo');
+}
+
+async function generateOpenAiText(prompt) {
+  let lastError = null;
+
+  for (const model of OPENAI_MODEL_CANDIDATES) {
+    const payload = {
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: 'Responde solo con JSON valido. No incluyas markdown ni bloques de codigo.'
+        },
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      temperature: 0.2
+    };
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      lastError = await response.text();
+      continue;
+    }
+
+    const decoded = await response.json();
+    const text = decoded?.choices?.[0]?.message?.content;
+    if (typeof text === 'string' && text.trim()) {
+      return { text, model };
+    }
+  }
+
+  throw new Error(lastError || 'Respuesta vacia de OpenAI');
+}
+
+async function generateAiText(prompt) {
+  const providers =
+    AI_PROVIDER === 'openai'
+      ? ['openai']
+      : AI_PROVIDER === 'gemini'
+        ? ['gemini']
+        : ['openai', 'gemini'];
+
+  let lastError = null;
+
+  for (const provider of providers) {
+    try {
+      if (provider === 'openai' && OPENAI_API_KEY) {
+        const result = await generateOpenAiText(prompt);
+        return { ...result, provider: 'openai' };
+      }
+      if (provider === 'gemini' && GEMINI_API_KEY) {
+        const result = await generateGeminiText(prompt);
+        return { ...result, provider: 'gemini' };
+      }
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  throw new Error(lastError || 'No hay proveedor IA disponible');
+}
+
+app.get('/health', (_, res) => {
+  res.json({
+    ok: true,
+    providerPreference: AI_PROVIDER,
+    hasGeminiKey: GEMINI_API_KEY.length > 0,
+    hasOpenAiKey: OPENAI_API_KEY.length > 0
+  });
+});
+
+app.post('/ai/analyze', async (req, res) => {
+  try {
+    if (!GEMINI_API_KEY && !OPENAI_API_KEY) {
+      return res.status(503).json({ error: 'No hay API key configurada (OPENAI_API_KEY o GEMINI_API_KEY).' });
+    }
+
+    const input = String(req.body?.input || '').trim();
+    const extraDetails = String(req.body?.extraDetails || '').trim();
+    const now = String(req.body?.now || new Date().toISOString());
+    const pendingContext = Array.isArray(req.body?.pendingContext)
+      ? req.body.pendingContext.slice(0, 8).map((e) => String(e))
+      : [];
+
+    if (!input) {
+      return res.status(400).json({ error: 'input es requerido' });
+    }
+
+    const combined = `${input} ${extraDetails}`.trim();
+    const contextBlock = pendingContext.length
+      ? pendingContext.map((e) => `- ${e}`).join('\n')
+      : 'No hay otras tareas activas.';
+
+    const prompt =
+      'Eres un planificador de productividad preciso. Responde solo JSON válido con estas llaves: ' +
+      'generated_title (string corto), plan_steps (array 4-6 pasos concretos para esta tarea considerando el resto de pendientes), ' +
+      'estimated_minutes (int 15-360 exacto y realista, NO aproximaciones vagas), difficulty (int 1-10), priority (int 1-10), ' +
+      'needs_deadline_clarification (bool), clarification_question (string corta en español), ' +
+      'due_text (string opcional como "mañana 18:00"), confidence (number 0-1). ' +
+      `Ahora: ${now}. Tarea objetivo: "${combined}".\nPendientes activos:\n${contextBlock}\n` +
+      'Calcula tiempo por descomposición de subtareas y devuelve minutos exactos.';
+
+    let text;
+    try {
+      const generated = await generateAiText(prompt);
+      text = generated.text;
+    } catch (e) {
+      return res.status(502).json({
+        error: 'Error del proveedor IA',
+        providerError: e instanceof Error ? e.message : String(e)
+      });
+    }
+
+    const ai = parseProviderJson(text);
+    if (!ai || typeof ai !== 'object') {
+      return res.status(502).json({ error: 'JSON invalido del proveedor IA' });
+    }
+
+    const data = {
+      generated_title:
+        typeof ai.generated_title === 'string' && ai.generated_title.trim()
+          ? ai.generated_title.trim()
+          : input,
+      plan_steps: Array.isArray(ai.plan_steps)
+        ? ai.plan_steps.map((e) => String(e).trim()).filter(Boolean).slice(0, 6)
+        : [],
+      estimated_minutes: normalizeMinutes(ai.estimated_minutes),
+      difficulty: Math.max(1, Math.min(10, Number(ai.difficulty) || 5)),
+      priority: Math.max(1, Math.min(10, Number(ai.priority) || 5)),
+      needs_deadline_clarification: ai.needs_deadline_clarification === true,
+      clarification_question:
+        typeof ai.clarification_question === 'string' && ai.clarification_question.trim()
+          ? ai.clarification_question.trim()
+          : '¿Para cuándo lo necesitas?',
+      due_text: typeof ai.due_text === 'string' ? ai.due_text.trim().toLowerCase() : '',
+      confidence: Math.max(0, Math.min(1, Number(ai.confidence) || 0.8)),
+      source: 'backend-ai'
+    };
+
+    return res.json({ data });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo interno en backend',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.post('/ai/wellbeing-chat', async (req, res) => {
+  try {
+    const message = String(req.body?.message || '').trim();
+    const currentRisk = normalizeRisk(req.body?.currentRisk);
+    const latestCheckIn = req.body?.latestCheckIn && typeof req.body.latestCheckIn === 'object'
+      ? req.body.latestCheckIn
+      : null;
+    const sensorContext = req.body?.sensorContext && typeof req.body.sensorContext === 'object'
+      ? req.body.sensorContext
+      : null;
+    const recentMessages = Array.isArray(req.body?.recentMessages)
+      ? req.body.recentMessages
+          .slice(-8)
+          .map((m) => ({
+            sender: String(m?.sender || 'user').slice(0, 10),
+            text: String(m?.text || '').slice(0, 600)
+          }))
+      : [];
+
+    if (!message) {
+      return res.status(400).json({ error: 'message es requerido' });
+    }
+
+    const textRisk = detectRiskSignals(message);
+    let detectedRisk = mergeRisk(currentRisk, textRisk);
+
+    if (latestCheckIn) {
+      const who5 = Number(latestCheckIn?.who5Percent || 0);
+      const phq2 = Number(latestCheckIn?.phq2Score || 0);
+      const gad2 = Number(latestCheckIn?.gad2Score || 0);
+      if (phq2 >= 5 || gad2 >= 5 || who5 <= 28) {
+        detectedRisk = mergeRisk(detectedRisk, 'high');
+      } else if (phq2 >= 3 || gad2 >= 3 || who5 <= 50) {
+        detectedRisk = mergeRisk(detectedRisk, 'medium');
+      }
+    }
+
+    if (sensorContext) {
+      const sleepHours = Number(sensorContext?.sleepHours ?? 8);
+      const screenMinutes = Number(sensorContext?.screenMinutes ?? 0);
+      const steps = Number(sensorContext?.steps ?? 0);
+      const restingHeartRate = Number(sensorContext?.restingHeartRate ?? 0);
+
+      if (sleepHours < 5 || screenMinutes > 420 || steps < 2500 || restingHeartRate > 95) {
+        detectedRisk = mergeRisk(detectedRisk, 'medium');
+      }
+      if (sleepHours < 4 && restingHeartRate > 105) {
+        detectedRisk = mergeRisk(detectedRisk, 'high');
+      }
+    }
+
+    const alerts = [];
+    if (detectedRisk === 'high') {
+      alerts.push({
+        title: 'Alerta alta de bienestar',
+        detail: 'Se detectaron senales de riesgo alto. Activar protocolo de intervencion inmediata.'
+      });
+    } else if (detectedRisk === 'medium') {
+      alerts.push({
+        title: 'Alerta preventiva',
+        detail: 'Se detectaron senales de malestar moderado. Sugerir seguimiento clinico en 24-72h.'
+      });
+    }
+
+    if (!GEMINI_API_KEY && !OPENAI_API_KEY) {
+      return res.json({
+        data: {
+          replyText: fallbackWellbeingReply(message, detectedRisk),
+          detectedRisk,
+          alerts,
+          source: 'fallback-no-key'
+        }
+      });
+    }
+
+    const contextCheckIn = latestCheckIn
+      ? `Ultimo check-in: WHO-5=${Number(latestCheckIn?.who5Percent || 0)}/100, PHQ-2=${Number(
+          latestCheckIn?.phq2Score || 0
+        )}/6, GAD-2=${Number(latestCheckIn?.gad2Score || 0)}/6. Resumen: ${String(
+          latestCheckIn?.summary || ''
+        )}`
+      : 'No hay check-in reciente.';
+
+    const contextMessages = recentMessages
+      .map((m) => `${m.sender}: ${m.text}`)
+      .join('\n');
+
+    const sensorBlock = sensorContext
+      ? `\nContexto de senales del dia: sueno=${Number(sensorContext?.sleepHours ?? 0)}h, pantalla=${Number(
+          sensorContext?.screenMinutes ?? 0
+        )}min, pasos=${Number(sensorContext?.steps ?? 0)}, FC reposo=${Number(
+          sensorContext?.restingHeartRate ?? 0
+        )} bpm.`
+      : '\nSin senales de sensores disponibles hoy.';
+
+    const prompt =
+      'Eres un asistente de bienestar escolar para adolescentes. Tu rol es apoyo emocional breve, no diagnostico. ' +
+      'Responde SIEMPRE en espanol neutro, 2-4 frases maximo, tono calido y concreto, y cierra con una sola pregunta util. ' +
+      'Si hay riesgo alto, prioriza seguridad inmediata y contacto con adulto/profesional. ' +
+      'Devuelve SOLO JSON valido con estas llaves: ' +
+      '{"replyText":"...","detectedRisk":"low|medium|high","alerts":[{"title":"...","detail":"..."}]}.' +
+      `\nConocimiento clinico:\n- ${CLINICAL_KB.join('\n- ')}\n` +
+      `\nRiesgo preliminar ya detectado: ${detectedRisk}.\n` +
+      `${contextCheckIn}\n` +
+      sensorBlock +
+      `Historial reciente:\n${contextMessages || 'Sin historial'}\n` +
+      `Mensaje actual del estudiante: ${message}`;
+
+    let text;
+    try {
+      const generated = await generateAiText(prompt);
+      text = generated.text;
+    } catch (e) {
+      return res.json({
+        data: {
+          replyText: fallbackWellbeingReply(message, detectedRisk),
+          detectedRisk,
+          alerts,
+          source: 'fallback-provider-error',
+          providerError: e instanceof Error ? e.message.slice(0, 500) : String(e).slice(0, 500)
+        }
+      });
+    }
+
+    const ai = parseProviderJson(text);
+    if (!ai || typeof ai !== 'object') {
+      return res.status(502).json({ error: 'JSON invalido del proveedor IA' });
+    }
+
+    const aiRisk = normalizeRisk(ai?.detectedRisk);
+    const finalRisk = mergeRisk(detectedRisk, aiRisk);
+    const aiAlerts = Array.isArray(ai?.alerts)
+      ? ai.alerts
+          .slice(0, 2)
+          .map((a) => ({
+            title: String(a?.title || 'Alerta preventiva').slice(0, 120),
+            detail: String(a?.detail || 'Sugerido seguimiento clinico.').slice(0, 300)
+          }))
+      : alerts;
+
+    return res.json({
+      data: {
+        replyText:
+          typeof ai?.replyText === 'string' && ai.replyText.trim()
+            ? ai.replyText.trim()
+            : fallbackWellbeingReply(message, finalRisk),
+        detectedRisk: finalRisk,
+        alerts: aiAlerts,
+        source: 'backend-wellbeing-ai'
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo interno en wellbeing-chat',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`AI backend listo en http://localhost:${PORT}`);
+});
