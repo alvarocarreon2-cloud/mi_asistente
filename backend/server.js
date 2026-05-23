@@ -135,14 +135,54 @@ function buildReflectionRationale(risk, findings, evidenceTerms, latestCheckIn) 
   const checkInText = latestCheckIn
     ? `El ultimo check-in marco WHO-5 ${Number(latestCheckIn?.who5Percent || 0)}/100, PHQ-2 ${Number(latestCheckIn?.phq2Score || 0)}/6 y GAD-2 ${Number(latestCheckIn?.gad2Score || 0)}/6.`
     : 'No hay un check-in reciente para contrastar este comentario.';
+  const actionByRisk =
+    risk === 'high'
+      ? 'Activar protocolo inmediato con adulto responsable y derivacion profesional el mismo dia.'
+      : risk === 'medium'
+        ? 'Realizar seguimiento en 24-72h, revisar sueno/carga academica y sostener escucha activa.'
+        : 'Mantener seguimiento preventivo y reforzar factores protectores durante la semana.';
+  const evidenceList = (evidenceTerms.length ? evidenceTerms : ['sin termino gatillo explicito'])
+    .map((term) => {
+      const lower = String(term).toLowerCase();
+      let connotation = 'expresion de malestar general no especifico';
+      let importance = 'Puede reflejar carga emocional inicial que conviene monitorear para prevenir escalada.';
 
-  if (risk === 'high') {
-    return `La IA considera riesgo alto porque ${evidenceText} y eso se relaciona con ${findings.join(', ')}. ${checkInText}`;
-  }
-  if (risk === 'medium') {
-    return `La IA considera riesgo moderado porque ${evidenceText} y aparecen ${findings.join(', ')} sin evidencia de crisis inmediata. ${checkInText}`;
-  }
-  return `La IA considera riesgo bajo porque ${evidenceText} y no se observan patrones criticos; ${findings.join(', ')}. ${checkInText}`;
+      if (lower.includes('ans')) {
+        connotation = 'activacion ansiosa y estado de hipervigilancia';
+        importance = 'La ansiedad sostenida suele afectar concentracion, descanso y regulacion emocional.';
+      } else if (lower.includes('no duermo') || lower.includes('sueno')) {
+        connotation = 'alteracion del sueno y recuperacion insuficiente';
+        importance = 'Dormir poco aumenta irritabilidad, fatiga cognitiva y sensibilidad al estres.';
+      } else if (lower.includes('estres') || lower.includes('presion') || lower.includes('saturado')) {
+        connotation = 'sobrecarga por estres percibido';
+        importance = 'La sobrecarga sostenida puede deteriorar rendimiento academico y bienestar diario.';
+      } else if (lower.includes('triste') || lower.includes('solo') || lower.includes('agotado')) {
+        connotation = 'desgaste emocional y posible aislamiento';
+        importance = 'El aislamiento y el agotamiento pueden reducir redes de apoyo y aumentar vulnerabilidad.';
+      } else if (lower.includes('suicid') || lower.includes('hacerme dano') || lower.includes('no quiero vivir')) {
+        connotation = 'contenido de riesgo critico autolesivo';
+        importance = 'Implica posible riesgo inminente y requiere intervencion inmediata sin demora.';
+      }
+
+      return `- Frase detectada: "${term}". Connotacion clinica: ${connotation}. Por que importa: ${importance}. Accion sugerida: ${actionByRisk}`;
+    })
+    .join('\n');
+
+  return `Resumen profesional: ${evidenceText}; hallazgos centrales: ${findings.join(', ')}. ${checkInText}\nAnalisis por evidencia:\n${evidenceList}`;
+}
+
+function ensureStructuredRationaleText(rationale, risk, findings, evidenceTerms, latestCheckIn) {
+  const base = buildReflectionRationale(risk, findings, evidenceTerms, latestCheckIn);
+  const current = String(rationale || '').trim();
+  if (!current) return base;
+
+  const hasStructuredMarkers =
+    /frase detectada\s*:/i.test(current) &&
+    /connotacion clinica\s*:/i.test(current) &&
+    /accion sugerida\s*:/i.test(current);
+
+  if (hasStructuredMarkers) return current;
+  return `${base}\n\nNota complementaria IA: ${current}`;
 }
 
 function buildReflectionInterpretation(risk, findings, evidenceTerms, latestCheckIn) {
@@ -555,6 +595,7 @@ app.post('/ai/wellbeing-chat', async (req, res) => {
     const prompt = analysisMode
       ? 'Eres un analista de bienestar escolar para profesionales. No diagnostiques. ' +
         'Explica de forma natural y detallada: que detectaste, por que lo consideras y que connotaciones tienen las frases del estudiante. ' +
+        'En el campo rationale usa formato fijo por cada hallazgo: Frase detectada, Connotacion clinica, Por que importa y Accion sugerida. ' +
         'Devuelve SOLO JSON valido con estas llaves: ' +
         '{"replyText":"...","interpretation":"...","detectedFindings":["..."],"rationale":"...","evidenceTerms":["..."],"patterns":["..."],"detectedRisk":"low|medium|high","alerts":[{"title":"...","detail":"..."}]}. ' +
         `\nConocimiento clinico:\n- ${CLINICAL_KB.join('\n- ')}\n` +
@@ -621,7 +662,7 @@ app.post('/ai/wellbeing-chat', async (req, res) => {
       ? ai.detectedFindings.map((v) => String(v).trim()).filter(Boolean).slice(0, 8)
       : fallbackAnalysis.data.detectedFindings;
 
-    const rationale =
+    const rawRationale =
       typeof ai?.rationale === 'string' && ai.rationale.trim()
         ? ai.rationale.trim()
         : fallbackAnalysis.data.rationale;
@@ -633,6 +674,14 @@ app.post('/ai/wellbeing-chat', async (req, res) => {
     const patterns = Array.isArray(ai?.patterns)
       ? ai.patterns.map((v) => String(v).trim()).filter(Boolean).slice(0, 8)
       : fallbackAnalysis.data.patterns;
+
+    const rationale = ensureStructuredRationaleText(
+      rawRationale,
+      finalRisk,
+      detectedFindings,
+      evidenceTerms,
+      latestCheckIn
+    );
 
     return res.json({
       data: {
@@ -749,9 +798,16 @@ Comentario actual: ${reflection}`;
     const interpretation = typeof ai?.interpretation === 'string' && ai.interpretation.trim()
       ? ai.interpretation.trim()
       : fallbackData.data.interpretation;
-    const rationale = typeof ai?.rationale === 'string' && ai.rationale.trim()
+    const rawRationale = typeof ai?.rationale === 'string' && ai.rationale.trim()
       ? ai.rationale.trim()
       : fallbackData.data.rationale;
+    const rationale = ensureStructuredRationaleText(
+      rawRationale,
+      detectedRisk,
+      detectedFindings,
+      evidenceTerms,
+      latestCheckIn
+    );
 
     return res.json({
       data: {
