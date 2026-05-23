@@ -81,6 +81,147 @@ function fallbackWellbeingReply(message, risk) {
   return 'Gracias por confiar en mi. Me alegra que lo compartas. Para cuidarte mejor hoy, que situacion te hizo sentir mejor y cual te costo mas?';
 }
 
+function matchEvidenceTerms(text) {
+  const normalized = String(text || '').toLowerCase();
+  const terms = [
+    'ansiedad',
+    'ansioso',
+    'preocupacion',
+    'nervioso',
+    'estres',
+    'estresado',
+    'agotado',
+    'presion',
+    'saturado',
+    'triste',
+    'solo',
+    'no duermo',
+    'me quiero morir',
+    'quiero desaparecer',
+    'hacerme daño',
+    'lastimarme',
+    'no quiero vivir',
+    'suicid'
+  ];
+
+  return terms.filter((term) => normalized.includes(term)).slice(0, 6);
+}
+
+function buildReflectionFindings(risk, evidenceTerms) {
+  const findings = [];
+  const joined = evidenceTerms.join(', ');
+
+  if (evidenceTerms.some((term) => term.includes('ans'))) {
+    findings.push('senales de ansiedad');
+  }
+  if (evidenceTerms.some((term) => term.includes('estres') || term.includes('presion') || term.includes('saturado'))) {
+    findings.push('senales de estres');
+  }
+  if (evidenceTerms.some((term) => term.includes('triste') || term.includes('agotado') || term.includes('solo'))) {
+    findings.push('malestar emocional');
+  }
+  if (risk === 'high') {
+    findings.push('indicadores de riesgo critico');
+  }
+  if (findings.length === 0) {
+    findings.push('sin indicadores criticos');
+  }
+
+  return { findings, joined };
+}
+
+function buildReflectionRationale(risk, findings, evidenceTerms, latestCheckIn) {
+  const evidenceText = evidenceTerms.length ? `se encontraron terminos como ${evidenceTerms.join(', ')}` : 'no se detectaron terminos de alarma claros';
+  const checkInText = latestCheckIn
+    ? `El ultimo check-in marco WHO-5 ${Number(latestCheckIn?.who5Percent || 0)}/100, PHQ-2 ${Number(latestCheckIn?.phq2Score || 0)}/6 y GAD-2 ${Number(latestCheckIn?.gad2Score || 0)}/6.`
+    : 'No hay un check-in reciente para contrastar este comentario.';
+
+  if (risk === 'high') {
+    return `La IA considera riesgo alto porque ${evidenceText} y eso se relaciona con ${findings.join(', ')}. ${checkInText}`;
+  }
+  if (risk === 'medium') {
+    return `La IA considera riesgo moderado porque ${evidenceText} y aparecen ${findings.join(', ')} sin evidencia de crisis inmediata. ${checkInText}`;
+  }
+  return `La IA considera riesgo bajo porque ${evidenceText} y no se observan patrones criticos; ${findings.join(', ')}. ${checkInText}`;
+}
+
+function buildReflectionInterpretation(risk, findings, evidenceTerms, latestCheckIn) {
+  const evidenceText = evidenceTerms.length ? evidenceTerms.join(', ') : 'sin terminos gatillo directos';
+  const checkInText = latestCheckIn
+    ? `Se contrasta con WHO-5 ${Number(latestCheckIn?.who5Percent || 0)}/100, PHQ-2 ${Number(latestCheckIn?.phq2Score || 0)}/6 y GAD-2 ${Number(latestCheckIn?.gad2Score || 0)}/6.`
+    : 'No hay check-in reciente para contrastar.';
+
+  if (risk === 'high') {
+    return `Detecto un comentario con carga emocional alta. Los hallazgos principales son ${findings.join(', ')} y la evidencia textual relevante incluye ${evidenceText}. ${checkInText} Por eso sugiero contacto profesional prioritario y verificacion de apoyo inmediato.`;
+  }
+  if (risk === 'medium') {
+    return `Detecto un comentario con carga emocional moderada. Los hallazgos principales son ${findings.join(', ')} y la evidencia textual relevante incluye ${evidenceText}. ${checkInText} Por eso sugiero seguimiento breve, escucha activa y monitoreo en los proximos dias.`;
+  }
+  return `Detecto un comentario con tono estable o protector. Los hallazgos principales son ${findings.join(', ')} y la evidencia textual relevante incluye ${evidenceText}. ${checkInText} Por eso sugiero seguimiento preventivo y reforzar factores protectores.`;
+}
+
+function analyzeReflectionFallback(payload) {
+  const reflection = String(payload?.reflection || '').trim();
+  const currentRisk = normalizeRisk(payload?.currentRisk);
+  const latestCheckIn = payload?.latestCheckIn && typeof payload.latestCheckIn === 'object' ? payload.latestCheckIn : null;
+  const textRisk = detectRiskSignals(reflection);
+  let detectedRisk = mergeRisk(currentRisk, textRisk);
+
+  if (latestCheckIn) {
+    const who5 = Number(latestCheckIn?.who5Percent || 0);
+    const phq2 = Number(latestCheckIn?.phq2Score || 0);
+    const gad2 = Number(latestCheckIn?.gad2Score || 0);
+    if (who5 < 50 && phq2 >= 3 && gad2 >= 3) {
+      detectedRisk = mergeRisk(detectedRisk, 'high');
+    } else if (who5 < 50 || phq2 >= 3 || gad2 >= 3) {
+      detectedRisk = mergeRisk(detectedRisk, 'medium');
+    }
+  }
+
+  const evidenceTerms = matchEvidenceTerms(reflection);
+  const { findings } = buildReflectionFindings(detectedRisk, evidenceTerms);
+  const rationale = buildReflectionRationale(detectedRisk, findings, evidenceTerms, latestCheckIn);
+  const interpretation = buildReflectionInterpretation(detectedRisk, findings, evidenceTerms, latestCheckIn);
+
+  const alerts = [];
+  if (detectedRisk === 'high') {
+    alerts.push({
+      title: 'Alerta alta detectada por comentario',
+      detail: 'El comentario muestra senales criticas. Se recomienda intervencion hoy.'
+    });
+  } else if (detectedRisk === 'medium') {
+    alerts.push({
+      title: 'Alerta preventiva',
+      detail: 'El comentario muestra carga emocional moderada. Sugerido seguimiento en 24-72h.'
+    });
+  }
+
+  return {
+    data: {
+      interpretation,
+      detectedFindings: findings,
+      rationale,
+      evidenceTerms,
+      patterns: evidenceTerms.length ? evidenceTerms : ['seguimiento general'],
+      detectedRisk,
+      alerts,
+      source: 'backend-wellbeing-reflection'
+    }
+  };
+}
+
+function extractReflectionFromMessage(message) {
+  const raw = String(message || '').trim();
+  if (!raw) return '';
+
+  const quoted = raw.match(/comentario\s*:\s*["“](.+?)["”]/i);
+  if (quoted && quoted[1]) {
+    return quoted[1].trim();
+  }
+
+  return raw;
+}
+
 function parseProviderJson(text) {
   const raw = String(text || '').trim();
   if (!raw) return null;
@@ -307,6 +448,8 @@ app.post('/ai/wellbeing-chat', async (req, res) => {
   try {
     const message = String(req.body?.message || '').trim();
     const currentRisk = normalizeRisk(req.body?.currentRisk);
+    const analysisMode = /analiza este comentario|profesional escolar|que detectaste y por que/i.test(message);
+    const reflectionText = extractReflectionFromMessage(message);
     const latestCheckIn = req.body?.latestCheckIn && typeof req.body.latestCheckIn === 'object'
       ? req.body.latestCheckIn
       : null;
@@ -368,12 +511,23 @@ app.post('/ai/wellbeing-chat', async (req, res) => {
     }
 
     if (!GEMINI_API_KEY && !OPENAI_API_KEY) {
+      const fallbackAnalysis = analyzeReflectionFallback({
+        reflection: reflectionText,
+        currentRisk,
+        latestCheckIn
+      });
       return res.json({
         data: {
           replyText: fallbackWellbeingReply(message, detectedRisk),
           detectedRisk,
           alerts,
-          source: 'fallback-no-key'
+          source: 'fallback-no-key',
+          interpretation: fallbackAnalysis.data.interpretation,
+          detectedFindings: fallbackAnalysis.data.detectedFindings,
+          rationale: fallbackAnalysis.data.rationale,
+          evidenceTerms: fallbackAnalysis.data.evidenceTerms,
+          patterns: fallbackAnalysis.data.patterns,
+          analysisMode
         }
       });
     }
@@ -398,18 +552,28 @@ app.post('/ai/wellbeing-chat', async (req, res) => {
         )} bpm.`
       : '\nSin senales de sensores disponibles hoy.';
 
-    const prompt =
-      'Eres un asistente de bienestar escolar para adolescentes. Tu rol es apoyo emocional breve, no diagnostico. ' +
-      'Responde SIEMPRE en espanol neutro, 2-4 frases maximo, tono calido y concreto, y cierra con una sola pregunta util. ' +
-      'Si hay riesgo alto, prioriza seguridad inmediata y contacto con adulto/profesional. ' +
-      'Devuelve SOLO JSON valido con estas llaves: ' +
-      '{"replyText":"...","detectedRisk":"low|medium|high","alerts":[{"title":"...","detail":"..."}]}.' +
-      `\nConocimiento clinico:\n- ${CLINICAL_KB.join('\n- ')}\n` +
-      `\nRiesgo preliminar ya detectado: ${detectedRisk}.\n` +
-      `${contextCheckIn}\n` +
-      sensorBlock +
-      `Historial reciente:\n${contextMessages || 'Sin historial'}\n` +
-      `Mensaje actual del estudiante: ${message}`;
+    const prompt = analysisMode
+      ? 'Eres un analista de bienestar escolar para profesionales. No diagnostiques. ' +
+        'Explica de forma natural y detallada: que detectaste, por que lo consideras y que connotaciones tienen las frases del estudiante. ' +
+        'Devuelve SOLO JSON valido con estas llaves: ' +
+        '{"replyText":"...","interpretation":"...","detectedFindings":["..."],"rationale":"...","evidenceTerms":["..."],"patterns":["..."],"detectedRisk":"low|medium|high","alerts":[{"title":"...","detail":"..."}]}. ' +
+        `\nConocimiento clinico:\n- ${CLINICAL_KB.join('\n- ')}\n` +
+        `\nRiesgo preliminar ya detectado: ${detectedRisk}.\n` +
+        `${contextCheckIn}\n` +
+        sensorBlock +
+        `Historial reciente:\n${contextMessages || 'Sin historial'}\n` +
+        `Comentario actual del estudiante: ${reflectionText}`
+      : 'Eres un asistente de bienestar escolar para adolescentes. Tu rol es apoyo emocional breve, no diagnostico. ' +
+        'Responde SIEMPRE en espanol neutro, 2-4 frases maximo, tono calido y concreto, y cierra con una sola pregunta util. ' +
+        'Si hay riesgo alto, prioriza seguridad inmediata y contacto con adulto/profesional. ' +
+        'Devuelve SOLO JSON valido con estas llaves: ' +
+        '{"replyText":"...","detectedRisk":"low|medium|high","alerts":[{"title":"...","detail":"..."}]}.' +
+        `\nConocimiento clinico:\n- ${CLINICAL_KB.join('\n- ')}\n` +
+        `\nRiesgo preliminar ya detectado: ${detectedRisk}.\n` +
+        `${contextCheckIn}\n` +
+        sensorBlock +
+        `Historial reciente:\n${contextMessages || 'Sin historial'}\n` +
+        `Mensaje actual del estudiante: ${message}`;
 
     let text;
     try {
@@ -433,7 +597,12 @@ app.post('/ai/wellbeing-chat', async (req, res) => {
     }
 
     const aiRisk = normalizeRisk(ai?.detectedRisk);
-    const finalRisk = mergeRisk(detectedRisk, aiRisk);
+    const fallbackAnalysis = analyzeReflectionFallback({
+      reflection: reflectionText,
+      currentRisk,
+      latestCheckIn
+    });
+    const finalRisk = mergeRisk(mergeRisk(detectedRisk, aiRisk), normalizeRisk(fallbackAnalysis.data.detectedRisk));
     const aiAlerts = Array.isArray(ai?.alerts)
       ? ai.alerts
           .slice(0, 2)
@@ -443,6 +612,28 @@ app.post('/ai/wellbeing-chat', async (req, res) => {
           }))
       : alerts;
 
+    const interpretation =
+      typeof ai?.interpretation === 'string' && ai.interpretation.trim()
+        ? ai.interpretation.trim()
+        : fallbackAnalysis.data.interpretation;
+
+    const detectedFindings = Array.isArray(ai?.detectedFindings)
+      ? ai.detectedFindings.map((v) => String(v).trim()).filter(Boolean).slice(0, 8)
+      : fallbackAnalysis.data.detectedFindings;
+
+    const rationale =
+      typeof ai?.rationale === 'string' && ai.rationale.trim()
+        ? ai.rationale.trim()
+        : fallbackAnalysis.data.rationale;
+
+    const evidenceTerms = Array.isArray(ai?.evidenceTerms)
+      ? ai.evidenceTerms.map((v) => String(v).trim()).filter(Boolean).slice(0, 8)
+      : fallbackAnalysis.data.evidenceTerms;
+
+    const patterns = Array.isArray(ai?.patterns)
+      ? ai.patterns.map((v) => String(v).trim()).filter(Boolean).slice(0, 8)
+      : fallbackAnalysis.data.patterns;
+
     return res.json({
       data: {
         replyText:
@@ -451,12 +642,132 @@ app.post('/ai/wellbeing-chat', async (req, res) => {
             : fallbackWellbeingReply(message, finalRisk),
         detectedRisk: finalRisk,
         alerts: aiAlerts,
-        source: 'backend-wellbeing-ai'
+        source: 'backend-wellbeing-ai',
+        interpretation,
+        detectedFindings,
+        rationale,
+        evidenceTerms,
+        patterns,
+        analysisMode
       }
     });
   } catch (error) {
     return res.status(500).json({
       error: 'Fallo interno en wellbeing-chat',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.post('/ai/wellbeing-reflection', async (req, res) => {
+  try {
+    const reflection = String(req.body?.reflection || '').trim();
+    const currentRisk = normalizeRisk(req.body?.currentRisk);
+    const latestCheckIn = req.body?.latestCheckIn && typeof req.body.latestCheckIn === 'object'
+      ? req.body.latestCheckIn
+      : null;
+    const recentReflections = Array.isArray(req.body?.recentReflections)
+      ? req.body.recentReflections.slice(-8).map((r) => ({
+          text: String(r?.text || '').slice(0, 600),
+          patterns: Array.isArray(r?.patterns) ? r.patterns.slice(0, 8).map((p) => String(p)) : [],
+          risk: normalizeRisk(r?.risk)
+        }))
+      : [];
+    const sensorContext = req.body?.sensorContext && typeof req.body.sensorContext === 'object'
+      ? req.body.sensorContext
+      : null;
+
+    if (!reflection) {
+      return res.status(400).json({ error: 'reflection es requerido' });
+    }
+
+    const fallbackData = analyzeReflectionFallback({ reflection, currentRisk, latestCheckIn });
+
+    if (!GEMINI_API_KEY && !OPENAI_API_KEY) {
+      return res.json({
+        ...fallbackData,
+        data: {
+          ...fallbackData.data,
+          source: 'fallback-no-key'
+        }
+      });
+    }
+
+    const recentBlock = recentReflections.length
+      ? recentReflections.map((r) => `- ${r.text} [riesgo ${r.risk}; patrones: ${r.patterns.join(', ') || 'ninguno'}]`).join('\n')
+      : 'Sin reflexiones previas.';
+
+    const checkInBlock = latestCheckIn
+      ? `Ultimo check-in: WHO-5=${Number(latestCheckIn?.who5Percent || 0)}/100, PHQ-2=${Number(latestCheckIn?.phq2Score || 0)}/6, GAD-2=${Number(latestCheckIn?.gad2Score || 0)}/6. Resumen: ${String(latestCheckIn?.summary || '')}`
+      : 'No hay check-in reciente.';
+
+    const sensorBlock = sensorContext
+      ? `Sensores del dia: sueno=${Number(sensorContext?.sleepHours ?? 0)}h, pantalla=${Number(sensorContext?.screenMinutes ?? 0)}min, pasos=${Number(sensorContext?.steps ?? 0)}, FC reposo=${Number(sensorContext?.restingHeartRate ?? 0)} bpm.`
+      : 'Sin senales de sensores disponibles.';
+
+    const prompt = `Eres un analista de bienestar escolar. Responde solo JSON valido con estas llaves: {"interpretation":"...","detectedFindings":["..."],"rationale":"...","evidenceTerms":["..."],"patterns":["..."],"detectedRisk":"low|medium|high","alerts":[{"title":"...","detail":"..."}]}. Tu respuesta debe ser natural, detallada y clara para un profesional. Explica que detectaste y por que. No diagnostiques.
+Conocimiento clinico:
+- ${CLINICAL_KB.join('\n- ')}
+Riesgo preliminar: ${currentRisk}.
+${checkInBlock}
+${sensorBlock}
+Reflexiones recientes:
+${recentBlock}
+Comentario actual: ${reflection}`;
+
+    let text;
+    try {
+      const generated = await generateAiText(prompt);
+      text = generated.text;
+    } catch (e) {
+      return res.json(fallbackData);
+    }
+
+    const ai = parseProviderJson(text);
+    if (!ai || typeof ai !== 'object') {
+      return res.json(fallbackData);
+    }
+
+    const aiRisk = normalizeRisk(ai?.detectedRisk || fallbackData.data.detectedRisk);
+    const detectedRisk = mergeRisk(fallbackData.data.detectedRisk, aiRisk);
+    const evidenceTerms = Array.isArray(ai?.evidenceTerms) && ai.evidenceTerms.length
+      ? ai.evidenceTerms.map((e) => String(e).trim()).filter(Boolean)
+      : fallbackData.data.evidenceTerms;
+    const detectedFindings = Array.isArray(ai?.detectedFindings) && ai.detectedFindings.length
+      ? ai.detectedFindings.map((e) => String(e).trim()).filter(Boolean)
+      : fallbackData.data.detectedFindings;
+    const patterns = Array.isArray(ai?.patterns) && ai.patterns.length
+      ? ai.patterns.map((e) => String(e).trim()).filter(Boolean)
+      : fallbackData.data.patterns;
+    const alerts = Array.isArray(ai?.alerts)
+      ? ai.alerts.slice(0, 2).map((a) => ({
+          title: String(a?.title || 'Alerta preventiva').slice(0, 120),
+          detail: String(a?.detail || 'Sugerido seguimiento clinico.').slice(0, 300)
+        }))
+      : fallbackData.data.alerts;
+
+    const interpretation = typeof ai?.interpretation === 'string' && ai.interpretation.trim()
+      ? ai.interpretation.trim()
+      : fallbackData.data.interpretation;
+    const rationale = typeof ai?.rationale === 'string' && ai.rationale.trim()
+      ? ai.rationale.trim()
+      : fallbackData.data.rationale;
+
+    return res.json({
+      data: {
+        interpretation,
+        detectedFindings,
+        rationale,
+        evidenceTerms,
+        patterns,
+        detectedRisk,
+        alerts,
+        source: 'backend-wellbeing-reflection'
+      }
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo interno en wellbeing-reflection',
       detail: error instanceof Error ? error.message : String(error)
     });
   }
