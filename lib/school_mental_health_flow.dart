@@ -313,6 +313,66 @@ class PushBridgeService {
     }
   }
 
+  Future<void> syncStudentTreatmentPlans({
+    required String studentName,
+    required List<Map<String, dynamic>> plans,
+  }) async {
+    await _post(
+      '/treatments/sync-student',
+      {
+        'studentName': studentName,
+        'plans': plans,
+      },
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> fetchTreatmentPlansByStudent({
+    required String studentName,
+  }) async {
+    final uri = _uriFor('/treatments/by-student').replace(
+      queryParameters: {'studentName': studentName},
+    );
+
+    try {
+      final response = await http.get(uri);
+      if (response.statusCode < 200 || response.statusCode >= 300) return const [];
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return const [];
+      final raw = decoded['plans'];
+      if (raw is! List) return const [];
+      return raw.whereType<Map<String, dynamic>>().toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<Map<String, List<Map<String, dynamic>>>> fetchAllTreatmentPlans() async {
+    final uri = _uriFor('/treatments/all');
+    try {
+      final response = await http.get(uri);
+      if (response.statusCode < 200 || response.statusCode >= 300) return const {};
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return const {};
+      final rawStudents = decoded['students'];
+      if (rawStudents is! List) return const {};
+
+      final result = <String, List<Map<String, dynamic>>>{};
+      for (final item in rawStudents.whereType<Map<String, dynamic>>()) {
+        final name = (item['studentName'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
+        final rawPlans = item['plans'];
+        if (rawPlans is! List) {
+          result[name] = const [];
+          continue;
+        }
+        result[name] = rawPlans.whereType<Map<String, dynamic>>().toList();
+      }
+      return result;
+    } catch (_) {
+      return const {};
+    }
+  }
+
   Uri _uriFor(String path) {
     final base = _defaultPublicBackendUrl.endsWith('/')
         ? _defaultPublicBackendUrl.substring(0, _defaultPublicBackendUrl.length - 1)
@@ -334,7 +394,14 @@ class PushBridgeService {
 }
 
 class SchoolMentalHealthFlow extends StatefulWidget {
-  const SchoolMentalHealthFlow({super.key});
+  final bool isDarkMode;
+  final VoidCallback onToggleThemeMode;
+
+  const SchoolMentalHealthFlow({
+    super.key,
+    required this.isDarkMode,
+    required this.onToggleThemeMode,
+  });
 
   @override
   State<SchoolMentalHealthFlow> createState() => _SchoolMentalHealthFlowState();
@@ -351,6 +418,7 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
   int _lastRealtimeEventId = 0;
   late final List<StudentCase> _demoStudents;
   final Map<String, List<ProfessionalAppointment>> _appointmentsByStudent = {};
+  final Map<String, List<TreatmentPlan>> _treatmentsByStudent = {};
   final List<ProfessionalAgendaNotification> _professionalNotifications = [];
 
   @override
@@ -402,8 +470,10 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
       ),
     ];
     _appointmentsByStudent[_studentCase.studentName] = _studentCase.appointments;
+    _treatmentsByStudent[_studentCase.studentName] = _studentCase.treatmentPlans;
     for (final demo in _demoStudents) {
       _appointmentsByStudent[demo.studentName] = demo.appointments;
+      _treatmentsByStudent[demo.studentName] = demo.treatmentPlans;
     }
     _loadSavedRole();
   }
@@ -455,7 +525,12 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
     final withAppointments = students.map((student) {
       final appointments = _appointmentsByStudent[student.studentName] ??
           student.appointments;
-      return student.copyWith(appointments: appointments);
+      final treatmentPlans = _treatmentsByStudent[student.studentName] ??
+          student.treatmentPlans;
+      return student.copyWith(
+        appointments: appointments,
+        treatmentPlans: treatmentPlans,
+      );
     }).toList();
 
     withAppointments.sort((a, b) {
@@ -491,6 +566,7 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
         riskLevel: _mergeRisk(_studentCase.riskLevel, checkIn.riskLevel),
       );
       _appointmentsByStudent[_studentCase.studentName] = _studentCase.appointments;
+      _treatmentsByStudent[_studentCase.studentName] = _studentCase.treatmentPlans;
     });
   }
 
@@ -502,7 +578,72 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
         riskLevel: _mergeRisk(_studentCase.riskLevel, analysis.caseRisk),
       );
       _appointmentsByStudent[_studentCase.studentName] = _studentCase.appointments;
+      _treatmentsByStudent[_studentCase.studentName] = _studentCase.treatmentPlans;
     });
+  }
+
+  Future<void> _assignTreatmentPlan(TreatmentPlan plan, String studentName) async {
+    final current = _treatmentsByStudent[studentName] ?? const <TreatmentPlan>[];
+    final updated = [
+      plan,
+      ...current.where((existing) => existing.id != plan.id),
+    ];
+
+    setState(() {
+      _treatmentsByStudent[studentName] = updated;
+      if (studentName == _studentCase.studentName) {
+        _studentCase = _studentCase.copyWith(treatmentPlans: updated);
+      }
+    });
+
+    await _syncTreatmentPlansToBackend(studentName: studentName, plans: updated);
+    unawaited(
+      _publishTreatmentEvent(
+        role: 'student',
+        userId: studentName,
+        title: 'Nuevo plan de tratamiento',
+        detail: 'Tu profesional agrego actividades para trabajar esta semana.',
+      ),
+    );
+  }
+
+  Future<void> _toggleTreatmentTask({
+    required String studentName,
+    required String planId,
+    required String taskId,
+    required bool completed,
+  }) async {
+    final current = _treatmentsByStudent[studentName] ?? const <TreatmentPlan>[];
+    final updated = current.map((plan) {
+      if (plan.id != planId) return plan;
+      final tasks = plan.tasks.map((task) {
+        if (task.id != taskId) return task;
+        return task.copyWith(
+          completed: completed,
+          completedAt: completed ? DateTime.now() : null,
+        );
+      }).toList();
+      return plan.copyWith(tasks: tasks);
+    }).toList();
+
+    setState(() {
+      _treatmentsByStudent[studentName] = updated;
+      if (studentName == _studentCase.studentName) {
+        _studentCase = _studentCase.copyWith(treatmentPlans: updated);
+      }
+    });
+
+    await _syncTreatmentPlansToBackend(studentName: studentName, plans: updated);
+    unawaited(
+      _publishTreatmentEvent(
+        role: 'professional',
+        userId: 'default-professional',
+        title: 'Actualizacion de tratamiento',
+        detail: completed
+            ? '$studentName marco una actividad como realizada.'
+            : '$studentName marco una actividad como pendiente.',
+      ),
+    );
   }
 
   void _onStudentAppointmentResponse(AppointmentStudentResponse response) {
@@ -695,11 +836,19 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
                   studentCase: _studentCase,
                   onReflectionSubmitted: _onReflectionSubmitted,
                   onAppointmentResponse: _onStudentAppointmentResponse,
+                  onToggleTreatmentTask: (planId, taskId, completed) =>
+                      _toggleTreatmentTask(
+                        studentName: _studentCase.studentName,
+                        planId: planId,
+                        taskId: taskId,
+                        completed: completed,
+                      ),
                 ))
         : ProfessionalDashboard(
             students: _professionalStudents,
             onScheduleAppointment: _scheduleAppointment,
             notifications: _professionalNotifications,
+            onAssignTreatmentPlan: _assignTreatmentPlan,
           );
 
     return Scaffold(
@@ -710,6 +859,13 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
               : 'Dashboard Profesional',
         ),
         actions: [
+          IconButton(
+            tooltip: widget.isDarkMode ? 'Modo claro' : 'Modo oscuro',
+            onPressed: widget.onToggleThemeMode,
+            icon: Icon(
+              widget.isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+            ),
+          ),
           IconButton(
             tooltip: 'Cambiar perfil',
             onPressed: _logoutRole,
@@ -778,24 +934,61 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
     );
   }
 
+  Future<void> _syncTreatmentPlansToBackend({
+    required String studentName,
+    required List<TreatmentPlan> plans,
+  }) async {
+    await _pushBridgeService.syncStudentTreatmentPlans(
+      studentName: studentName,
+      plans: plans.map(_treatmentPlanToJson).toList(),
+    );
+  }
+
+  Future<void> _publishTreatmentEvent({
+    required String role,
+    required String userId,
+    required String title,
+    required String detail,
+  }) async {
+    await _pushBridgeService._post(
+      '/events/publish',
+      {
+        'role': role,
+        'userId': userId,
+        'title': title,
+        'detail': detail,
+        'type': 'treatment_update',
+      },
+    );
+  }
+
   Future<void> _syncAppointmentsFromBackendOnce() async {
     if (_activeRole == AppRole.student) {
       final rawList = await _pushBridgeService.fetchAppointmentsByStudent(
         studentName: _studentCase.studentName,
       );
+      final rawPlans = await _pushBridgeService.fetchTreatmentPlansByStudent(
+        studentName: _studentCase.studentName,
+      );
       final parsed = rawList.map(_appointmentFromJson).whereType<ProfessionalAppointment>().toList()
         ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
+      final parsedPlans = rawPlans.map(_treatmentPlanFromJson).whereType<TreatmentPlan>().toList();
 
       if (!mounted) return;
       setState(() {
         _appointmentsByStudent[_studentCase.studentName] = parsed;
-        _studentCase = _studentCase.copyWith(appointments: parsed);
+        _treatmentsByStudent[_studentCase.studentName] = parsedPlans;
+        _studentCase = _studentCase.copyWith(
+          appointments: parsed,
+          treatmentPlans: parsedPlans,
+        );
       });
       return;
     }
 
     if (_activeRole == AppRole.professional) {
       final all = await _pushBridgeService.fetchAllAppointments();
+      final allPlans = await _pushBridgeService.fetchAllTreatmentPlans();
       if (!mounted) return;
       setState(() {
         all.forEach((studentName, rawAppointments) {
@@ -807,6 +1000,16 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
           _appointmentsByStudent[studentName] = parsed;
           if (studentName == _studentCase.studentName) {
             _studentCase = _studentCase.copyWith(appointments: parsed);
+          }
+        });
+        allPlans.forEach((studentName, rawPlans) {
+          final parsedPlans = rawPlans
+              .map(_treatmentPlanFromJson)
+              .whereType<TreatmentPlan>()
+              .toList();
+          _treatmentsByStudent[studentName] = parsedPlans;
+          if (studentName == _studentCase.studentName) {
+            _studentCase = _studentCase.copyWith(treatmentPlans: parsedPlans);
           }
         });
       });
@@ -895,6 +1098,55 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
       default:
         return AppointmentActor.system;
     }
+  }
+
+  Map<String, dynamic> _treatmentPlanToJson(TreatmentPlan plan) {
+    return {
+      'id': plan.id,
+      'title': plan.title,
+      'summary': plan.summary,
+      'createdAt': plan.createdAt.toIso8601String(),
+      'assignedBy': plan.assignedBy,
+      'tasks': plan.tasks
+          .map(
+            (task) => {
+              'id': task.id,
+              'title': task.title,
+              'completed': task.completed,
+              'completedAt': task.completedAt?.toIso8601String(),
+            },
+          )
+          .toList(),
+    };
+  }
+
+  TreatmentPlan? _treatmentPlanFromJson(Map<String, dynamic> raw) {
+    final id = (raw['id'] ?? '').toString().trim();
+    final title = (raw['title'] ?? '').toString().trim();
+    if (id.isEmpty || title.isEmpty) return null;
+    final createdAt = DateTime.tryParse((raw['createdAt'] ?? '').toString()) ?? DateTime.now();
+    final rawTasks = raw['tasks'];
+    final tasks = rawTasks is List
+        ? rawTasks.whereType<Map<String, dynamic>>().map((taskRaw) {
+            return TreatmentTask(
+              id: (taskRaw['id'] ?? '').toString(),
+              title: (taskRaw['title'] ?? '').toString(),
+              completed: taskRaw['completed'] == true,
+              completedAt: taskRaw['completedAt'] == null
+                  ? null
+                  : DateTime.tryParse(taskRaw['completedAt'].toString()),
+            );
+          }).where((task) => task.id.isNotEmpty && task.title.isNotEmpty).toList()
+        : <TreatmentTask>[];
+
+    return TreatmentPlan(
+      id: id,
+      title: title,
+      summary: (raw['summary'] ?? '').toString(),
+      createdAt: createdAt,
+      assignedBy: (raw['assignedBy'] ?? 'Profesional KAIA').toString(),
+      tasks: tasks,
+    );
   }
 
   (String, String)? get _pollingTarget {
@@ -1355,12 +1607,15 @@ class StudentAiHome extends StatefulWidget {
   final StudentCase studentCase;
   final ValueChanged<ReflectionAnalysis> onReflectionSubmitted;
   final ValueChanged<AppointmentStudentResponse> onAppointmentResponse;
+  final Future<void> Function(String planId, String taskId, bool completed)
+      onToggleTreatmentTask;
 
   const StudentAiHome({
     super.key,
     required this.studentCase,
     required this.onReflectionSubmitted,
     required this.onAppointmentResponse,
+    required this.onToggleTreatmentTask,
   });
 
   @override
@@ -1435,7 +1690,6 @@ class _StudentAiHomeState extends State<StudentAiHome> {
   Widget build(BuildContext context) {
     final latest = widget.studentCase.latestCheckIn;
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-    final reflections = widget.studentCase.reflections.reversed.toList();
     final pendingAppointments = widget.studentCase.appointments
         .where((appointment) => appointment.status == AppointmentStatus.pending)
         .toList()
@@ -1444,6 +1698,7 @@ class _StudentAiHomeState extends State<StudentAiHome> {
         .where((appointment) => appointment.status == AppointmentStatus.confirmed)
         .toList()
       ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
+    final treatmentPlans = widget.studentCase.treatmentPlans;
     final usingPublicBackend = _effectiveBackendUrl != _backendUrl;
 
     return GestureDetector(
@@ -1457,151 +1712,120 @@ class _StudentAiHomeState extends State<StudentAiHome> {
               children: [
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(14),
+                  padding: const EdgeInsets.all(18),
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.purple.shade100),
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF0F172A), Color(0xFF1D4ED8)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Resumen de hoy',
+                      const Text(
+                        'Mi espacio',
                         style: TextStyle(
+                          color: Colors.white,
                           fontFamily: 'SF Pro Display',
-                          fontSize: 18,
-                          color: Colors.purple[800],
-                          fontWeight: FontWeight.w700,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 8),
                       Text(
                         latest == null
-                            ? 'Aún sin check-in registrado.'
-                            : '${latest.summary} Puntaje bienestar: ${latest.wellbeingScore}/100.',
-                        style: const TextStyle(fontFamily: 'SF Pro Text'),
-                      ),
-                      const SizedBox(height: 6),
-                      RiskPill(level: widget.studentCase.riskLevel),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Si quieres, puedes dejar un comentario libre de como te sentiste hoy para detectar patrones de estres o ansiedad.',
-                        style: TextStyle(
-                          color: Colors.grey[700],
+                            ? 'Todavia no registras tu check-in de hoy.'
+                            : 'Tu check-in de hoy ya quedo registrado. Seguimos acompanando tu proceso paso a paso.',
+                        style: const TextStyle(
+                          color: Colors.white,
                           fontFamily: 'SF Pro Text',
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          _miniTag(
-                            'Sueno ${_sensorContext.sleepHours.toStringAsFixed(1)}h',
+                          _infoChip(
+                            icon: Icons.calendar_today_outlined,
+                            label: confirmedAppointments.isEmpty
+                                ? 'Sin citas confirmadas'
+                                : '${confirmedAppointments.length} cita(s) confirmada(s)',
                           ),
-                          _miniTag('Pantalla ${_sensorContext.screenMinutes}m'),
-                          _miniTag('Pasos ${_sensorContext.steps}'),
-                          _miniTag('FC ${_sensorContext.restingHeartRate}'),
+                          _infoChip(
+                            icon: Icons.task_alt_outlined,
+                            label: treatmentPlans.isEmpty
+                                ? 'Sin tareas asignadas'
+                                : '${treatmentPlans.expand((plan) => plan.tasks).where((task) => task.completed).length}/${treatmentPlans.expand((plan) => plan.tasks).length} tareas listas',
+                          ),
                         ],
                       ),
                       const SizedBox(height: 8),
-                      if (usingPublicBackend)
-                        Container(
-                          width: double.infinity,
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF8F0FF),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.purple.shade100),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _openChatSettings,
+                          icon: const Icon(Icons.tune, color: Colors.white),
+                          label: const Text(
+                            'Ajustes de conexion',
+                            style: TextStyle(color: Colors.white),
                           ),
-                          child: Text(
-                            'Se detecto URL local y se aplico backend publico para asegurar conexion online.',
-                            style: TextStyle(
-                              color: Colors.purple[900],
-                              fontFamily: 'SF Pro Text',
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      TextButton.icon(
-                        onPressed: _openChatSettings,
-                        icon: const Icon(Icons.tune),
-                        label: const Text(
-                          'Configurar conexion y datos del dia',
                         ),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (pendingAppointments.isNotEmpty)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFF8E8),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFF5D494)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.notifications_active_outlined,
-                              color: Colors.orange[700],
-                            ),
-                            const SizedBox(width: 8),
-                            const Expanded(
-                              child: Text(
-                                'Notificaciones de cita pendientes',
-                                style: TextStyle(
-                                  fontFamily: 'SF Pro Display',
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ],
+                _studentSection(
+                  title: 'Citas',
+                  icon: Icons.event_available_outlined,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (pendingAppointments.isEmpty && confirmedAppointments.isEmpty)
+                        Text(
+                          'No tienes citas registradas por ahora.',
+                          style: TextStyle(color: Colors.grey[700]),
                         ),
-                        const SizedBox(height: 10),
+                      if (pendingAppointments.isNotEmpty) ...[
+                        Text(
+                          'Pendientes de confirmar',
+                          style: TextStyle(
+                            color: Colors.orange[800],
+                            fontFamily: 'SF Pro Display',
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
                         ...pendingAppointments.map((appointment) {
                           final startsAt = _formatDateTime(appointment.scheduledFor);
                           return Container(
                             margin: const EdgeInsets.only(bottom: 10),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: const Color(0xFFFFF8E8),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.orange.shade100),
+                              border: Border.all(color: const Color(0xFFF5D494)),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Cita propuesta: $startsAt',
+                                  startsAt,
                                   style: const TextStyle(
                                     fontFamily: 'SF Pro Text',
                                     fontWeight: FontWeight.w700,
                                   ),
                                 ),
                                 const SizedBox(height: 4),
-                                Text(
-                                  'Motivo clinico: ${appointment.reason}',
-                                  style: TextStyle(
-                                    color: Colors.grey[800],
-                                    fontFamily: 'SF Pro Text',
-                                  ),
-                                ),
+                                Text(appointment.reason),
                                 const SizedBox(height: 10),
                                 Row(
                                   children: [
                                     Expanded(
-                                      child: OutlinedButton.icon(
+                                      child: OutlinedButton(
                                         onPressed: () {
                                           widget.onAppointmentResponse(
                                             AppointmentStudentResponse(
@@ -1611,19 +1835,16 @@ class _StudentAiHomeState extends State<StudentAiHome> {
                                           );
                                           ScaffoldMessenger.of(context).showSnackBar(
                                             const SnackBar(
-                                              content: Text(
-                                                'Marcaste que no puedes en esa fecha.',
-                                              ),
+                                              content: Text('Avisaste que no puedes asistir en ese horario.'),
                                             ),
                                           );
                                         },
-                                        icon: const Icon(Icons.close_rounded),
-                                        label: const Text('No puedo'),
+                                        child: const Text('No puedo'),
                                       ),
                                     ),
                                     const SizedBox(width: 8),
                                     Expanded(
-                                      child: ElevatedButton.icon(
+                                      child: ElevatedButton(
                                         onPressed: () {
                                           widget.onAppointmentResponse(
                                             AppointmentStudentResponse(
@@ -1633,14 +1854,11 @@ class _StudentAiHomeState extends State<StudentAiHome> {
                                           );
                                           ScaffoldMessenger.of(context).showSnackBar(
                                             const SnackBar(
-                                              content: Text(
-                                                'Cita confirmada. Gracias por validar tu disponibilidad.',
-                                              ),
+                                              content: Text('Confirmaste tu disponibilidad para la cita.'),
                                             ),
                                           );
                                         },
-                                        icon: const Icon(Icons.check_rounded),
-                                        label: const Text('Puedo asistir'),
+                                        child: const Text('Confirmar'),
                                       ),
                                     ),
                                   ],
@@ -1649,26 +1867,13 @@ class _StudentAiHomeState extends State<StudentAiHome> {
                             ),
                           );
                         }),
+                        const SizedBox(height: 8),
                       ],
-                    ),
-                  ),
-                if (confirmedAppointments.isNotEmpty)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.green.shade100),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+                      if (confirmedAppointments.isNotEmpty) ...[
                         Text(
-                          'Citas confirmadas',
+                          'Proximas',
                           style: TextStyle(
-                            color: Colors.green.shade800,
+                            color: Colors.green[800],
                             fontFamily: 'SF Pro Display',
                             fontWeight: FontWeight.w700,
                           ),
@@ -1676,65 +1881,127 @@ class _StudentAiHomeState extends State<StudentAiHome> {
                         const SizedBox(height: 8),
                         ...confirmedAppointments.take(3).map((appointment) {
                           return Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Text(
-                              '• ${_formatDateTime(appointment.scheduledFor)} · ${appointment.reason}',
-                              style: const TextStyle(fontFamily: 'SF Pro Text'),
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  Icons.check_circle_rounded,
+                                  size: 18,
+                                  color: Colors.green.shade700,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '${_formatDateTime(appointment.scheduledFor)} · ${appointment.reason}',
+                                  ),
+                                ),
+                              ],
                             ),
                           );
                         }),
                       ],
-                    ),
+                    ],
                   ),
-                ...reflections.map((reflection) {
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.purple.shade100),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          reflection.text,
-                          style: const TextStyle(
-                            fontFamily: 'SF Pro Text',
-                            fontWeight: FontWeight.w600,
-                          ),
+                ),
+                const SizedBox(height: 12),
+                _studentSection(
+                  title: 'Tratamiento',
+                  icon: Icons.favorite_outline,
+                  child: treatmentPlans.isEmpty
+                      ? Text(
+                          'Tu profesional aun no te ha compartido tareas o seguimiento.',
+                          style: TextStyle(color: Colors.grey[700]),
+                        )
+                      : Column(
+                          children: treatmentPlans.map((plan) {
+                            return Container(
+                              width: double.infinity,
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: Colors.blue.shade100),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    plan.title,
+                                    style: const TextStyle(
+                                      fontFamily: 'SF Pro Display',
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  if (plan.summary.isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    Text(plan.summary),
+                                  ],
+                                  const SizedBox(height: 10),
+                                  ...plan.tasks.map((task) {
+                                    return CheckboxListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      value: task.completed,
+                                      title: Text(task.title),
+                                      subtitle: task.completedAt == null
+                                          ? null
+                                          : Text(
+                                              'Marcada el ${_formatDateTime(task.completedAt!)}',
+                                            ),
+                                      onChanged: (value) {
+                                        widget.onToggleTreatmentTask(
+                                          plan.id,
+                                          task.id,
+                                          value ?? false,
+                                        );
+                                      },
+                                      controlAffinity:
+                                          ListTileControlAffinity.leading,
+                                    );
+                                  }),
+                                ],
+                              ),
+                            );
+                          }).toList(),
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          reflection.interpretation,
-                          style: TextStyle(
-                            color: Colors.grey[700],
-                            fontFamily: 'SF Pro Text',
+                ),
+                const SizedBox(height: 12),
+                _studentSection(
+                  title: 'Registro personal',
+                  icon: Icons.edit_note_outlined,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        latest == null
+                            ? 'Cuando quieras, puedes dejar un comentario breve sobre como te fue hoy.'
+                            : latest.summary,
+                        style: TextStyle(color: Colors.grey[800]),
+                      ),
+                      if (usingPublicBackend) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF8F0FF),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.purple.shade100),
                           ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Fuente del analisis: ${reflection.source}',
-                          style: TextStyle(
-                            color: Colors.grey[600],
-                            fontFamily: 'SF Pro Text',
-                            fontSize: 12,
+                          child: Text(
+                            'Se uso el backend publico para mantener la conexion activa.',
+                            style: TextStyle(
+                              color: Colors.purple[900],
+                              fontFamily: 'SF Pro Text',
+                              fontSize: 12,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            RiskPill(level: reflection.detectedRisk),
-                            ...reflection.patterns.map(_miniTag),
-                          ],
                         ),
                       ],
-                    ),
-                  );
-                }),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -1812,6 +2079,13 @@ class _StudentAiHomeState extends State<StudentAiHome> {
       if (!mounted) return;
       _controller.clear();
       widget.onReflectionSubmitted(analysis);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Gracias por tu confianza y por tomarte este tiempo. Tu mensaje quedo guardado.',
+          ),
+        ),
+      );
     } on AiAnalysisException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1833,16 +2107,64 @@ class _StudentAiHomeState extends State<StudentAiHome> {
     }
   }
 
-  Widget _miniTag(String text) {
+  Widget _studentSection({
+    required String title,
+    required IconData icon,
+    required Widget child,
+  }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.purple.shade50,
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.16)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontFamily: 'SF Pro Display',
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _infoChip({required IconData icon, required String label}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.14),
         borderRadius: BorderRadius.circular(99),
       ),
-      child: Text(
-        text,
-        style: const TextStyle(fontFamily: 'SF Pro Text', fontSize: 12),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.white),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontFamily: 'SF Pro Text',
+              fontSize: 12,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2045,12 +2367,15 @@ class ProfessionalDashboard extends StatefulWidget {
   final Future<AppointmentScheduleResult> Function(AppointmentRequest request)
       onScheduleAppointment;
   final List<ProfessionalAgendaNotification> notifications;
+  final Future<void> Function(TreatmentPlan plan, String studentName)
+      onAssignTreatmentPlan;
 
   const ProfessionalDashboard({
     super.key,
     required this.students,
     required this.onScheduleAppointment,
     required this.notifications,
+    required this.onAssignTreatmentPlan,
   });
 
   @override
@@ -2065,6 +2390,15 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
   String? _selectedStudentName;
   final TextEditingController _reasonController = TextEditingController(
     text: 'Seguimiento clinico preventivo por riesgo detectado.',
+  );
+  final TextEditingController _treatmentTitleController = TextEditingController(
+    text: 'Plan semanal de autocuidado',
+  );
+  final TextEditingController _treatmentSummaryController = TextEditingController(
+    text: 'Pequenas acciones diarias para sostener rutina, descanso y regulacion emocional.',
+  );
+  final TextEditingController _treatmentTasksController = TextEditingController(
+    text: 'Dormir antes de las 11 pm\nCaminar 15 minutos\nRegistrar una emocion del dia',
   );
   DateTime _selectedDateTime = DateTime.now().add(const Duration(days: 1));
   int _selectedDurationMinutes = 45;
@@ -2101,6 +2435,9 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
   @override
   void dispose() {
     _reasonController.dispose();
+    _treatmentTitleController.dispose();
+    _treatmentSummaryController.dispose();
+    _treatmentTasksController.dispose();
     super.dispose();
   }
 
@@ -2279,11 +2616,55 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
     );
   }
 
+  Future<void> _saveTreatmentPlan() async {
+    final selectedStudent = _selectedStudent;
+    if (selectedStudent == null) return;
+
+    final title = _treatmentTitleController.text.trim();
+    final summary = _treatmentSummaryController.text.trim();
+    final tasks = _treatmentTasksController.text
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+
+    if (title.isEmpty || tasks.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Agrega un titulo y al menos una tarea.')),
+      );
+      return;
+    }
+
+    final plan = TreatmentPlan(
+      id: '${selectedStudent.studentName}-${DateTime.now().microsecondsSinceEpoch}',
+      title: title,
+      summary: summary,
+      createdAt: DateTime.now(),
+      assignedBy: 'Profesional KAIA',
+      tasks: tasks
+          .map(
+            (task) => TreatmentTask(
+              id: '${selectedStudent.studentName}-${task.hashCode}-${DateTime.now().millisecondsSinceEpoch}',
+              title: task,
+              completed: false,
+            ),
+          )
+          .toList(),
+    );
+
+    await widget.onAssignTreatmentPlan(plan, selectedStudent.studentName);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Tratamiento asignado al alumno.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final selectedStudent = _selectedStudent;
     final alerts = selectedStudent?.alerts.reversed.take(5).toList() ??
         const <ProfessionalAlert>[];
+    final treatmentPlans = selectedStudent?.treatmentPlans ?? const <TreatmentPlan>[];
     final highRisk = widget.students
         .where((s) => s.riskLevel == RiskLevel.high)
         .length;
@@ -2448,6 +2829,70 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
                         ),
                       ),
                     ],
+                    const SizedBox(height: 12),
+                    Text(
+                      'Tratamiento Activo',
+                      style: TextStyle(
+                        color: Colors.purple[800],
+                        fontFamily: 'SF Pro Display',
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (treatmentPlans.isEmpty)
+                      Text(
+                        'Sin plan asignado todavia.',
+                        style: TextStyle(color: Colors.grey[700]),
+                      )
+                    else
+                      ...treatmentPlans.take(2).map((plan) {
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade50,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.grey.shade200),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                plan.title,
+                                style: const TextStyle(
+                                  fontFamily: 'SF Pro Text',
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              if (plan.summary.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(plan.summary),
+                              ],
+                              const SizedBox(height: 8),
+                              ...plan.tasks.map((task) {
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 4),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        task.completed
+                                            ? Icons.check_circle_rounded
+                                            : Icons.radio_button_unchecked,
+                                        size: 18,
+                                        color: task.completed
+                                            ? Colors.green.shade700
+                                            : Colors.grey.shade500,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(child: Text(task.title)),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            ],
+                          ),
+                        );
+                      }),
                     const SizedBox(height: 12),
                     Text(
                       'Alertas Recientes',
@@ -2757,6 +3202,43 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
           ),
         );
 
+        final treatmentPanel = _surfaceCard(
+          title: 'Tratamiento y Tareas',
+          subtitle: 'Asigna acciones concretas para seguimiento diario.',
+          icon: Icons.fact_check_outlined,
+          child: Column(
+            children: [
+              TextField(
+                controller: _treatmentTitleController,
+                decoration: const InputDecoration(labelText: 'Titulo del plan'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _treatmentSummaryController,
+                maxLines: 2,
+                decoration: const InputDecoration(labelText: 'Resumen'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _treatmentTasksController,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Tareas (una por linea)',
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _saveTreatmentPlan,
+                  icon: const Icon(Icons.playlist_add_check_circle_outlined),
+                  label: const Text('Asignar tratamiento'),
+                ),
+              ),
+            ],
+          ),
+        );
+
         final notificationsPanel = _surfaceCard(
           title: 'Respuestas de Estudiantes',
           subtitle: 'Confirmaciones y rechazos recientes de citas.',
@@ -2833,6 +3315,8 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
                       const SizedBox(height: 12),
                       notificationsPanel,
                       const SizedBox(height: 12),
+                      treatmentPanel,
+                      const SizedBox(height: 12),
                       schedulerPanel,
                     ],
                   ),
@@ -2861,6 +3345,8 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
             const SizedBox(height: 12),
             notificationsPanel,
             const SizedBox(height: 12),
+            treatmentPanel,
+            const SizedBox(height: 12),
             schedulerPanel,
           ],
         );
@@ -2876,6 +3362,8 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
             agendaPanel,
             const SizedBox(height: 12),
             notificationsPanel,
+            const SizedBox(height: 12),
+            treatmentPanel,
             const SizedBox(height: 12),
             schedulerPanel,
           ],
@@ -3245,6 +3733,70 @@ class ProfessionalAppointment {
   }
 }
 
+class TreatmentTask {
+  final String id;
+  final String title;
+  final bool completed;
+  final DateTime? completedAt;
+
+  const TreatmentTask({
+    required this.id,
+    required this.title,
+    required this.completed,
+    this.completedAt,
+  });
+
+  TreatmentTask copyWith({
+    String? id,
+    String? title,
+    bool? completed,
+    DateTime? completedAt,
+  }) {
+    return TreatmentTask(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      completed: completed ?? this.completed,
+      completedAt: completedAt ?? this.completedAt,
+    );
+  }
+}
+
+class TreatmentPlan {
+  final String id;
+  final String title;
+  final String summary;
+  final DateTime createdAt;
+  final String assignedBy;
+  final List<TreatmentTask> tasks;
+
+  const TreatmentPlan({
+    required this.id,
+    required this.title,
+    required this.summary,
+    required this.createdAt,
+    required this.assignedBy,
+    required this.tasks,
+  });
+
+  TreatmentPlan copyWith({
+    String? id,
+    String? title,
+    String? summary,
+    DateTime? createdAt,
+    String? assignedBy,
+    List<TreatmentTask>? tasks,
+  }) {
+    return TreatmentPlan(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      summary: summary ?? this.summary,
+      createdAt: createdAt ?? this.createdAt,
+      assignedBy: assignedBy ?? this.assignedBy,
+      tasks: tasks ?? this.tasks,
+    );
+  }
+}
+
 class StudentCase {
   final String studentName;
   final String? photoUrl;
@@ -3252,6 +3804,7 @@ class StudentCase {
   final List<StudentReflection>? _reflections;
   final List<ProfessionalAlert> alerts;
   final List<ProfessionalAppointment> appointments;
+  final List<TreatmentPlan> treatmentPlans;
   final RiskLevel riskLevel;
 
   List<StudentReflection> get reflections => _reflections ?? const [];
@@ -3263,6 +3816,7 @@ class StudentCase {
     List<StudentReflection>? reflections,
     required this.alerts,
     required this.appointments,
+    required this.treatmentPlans,
     required this.riskLevel,
   }) : _reflections = reflections;
 
@@ -3274,6 +3828,7 @@ class StudentCase {
       reflections: const [],
       alerts: const [],
       appointments: const [],
+      treatmentPlans: const [],
       riskLevel: RiskLevel.low,
     );
   }
@@ -3290,6 +3845,7 @@ class StudentCase {
       reflections: const [],
       alerts: const [],
       appointments: const [],
+      treatmentPlans: const [],
       riskLevel: latestCheckIn.riskLevel,
     );
   }
@@ -3303,6 +3859,7 @@ class StudentCase {
     List<StudentReflection>? reflections,
     List<ProfessionalAlert>? alerts,
     List<ProfessionalAppointment>? appointments,
+    List<TreatmentPlan>? treatmentPlans,
     RiskLevel? riskLevel,
   }) {
     return StudentCase(
@@ -3312,6 +3869,7 @@ class StudentCase {
       reflections: reflections ?? this.reflections,
       alerts: alerts ?? this.alerts,
       appointments: appointments ?? this.appointments,
+      treatmentPlans: treatmentPlans ?? this.treatmentPlans,
       riskLevel: riskLevel ?? this.riskLevel,
     );
   }

@@ -33,6 +33,7 @@ const MAX_EVENT_RETENTION = Number(process.env.EVENT_RETENTION || 300);
 let eventSequence = 0;
 const realtimeEvents = [];
 const appointmentsByStudent = new Map();
+const treatmentsByStudent = new Map();
 
 function normalizePushRole(value) {
   const role = String(value || '').trim().toLowerCase();
@@ -114,6 +115,41 @@ function sanitizeAppointment(raw) {
 
 function sortAppointments(items) {
   return [...items].sort((a, b) => String(a.scheduledFor).localeCompare(String(b.scheduledFor)));
+}
+
+function sanitizeTreatmentTask(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id || '').trim().slice(0, 180);
+  const title = String(raw.title || '').trim().slice(0, 180);
+  if (!id || !title) return null;
+
+  return {
+    id,
+    title,
+    completed: raw.completed === true,
+    completedAt: raw.completedAt ? String(raw.completedAt) : null
+  };
+}
+
+function sanitizeTreatmentPlan(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id || '').trim().slice(0, 180);
+  const title = String(raw.title || '').trim().slice(0, 180);
+  const summary = String(raw.summary || '').trim().slice(0, 400);
+  if (!id || !title) return null;
+
+  const tasks = Array.isArray(raw.tasks)
+    ? raw.tasks.map(sanitizeTreatmentTask).filter(Boolean)
+    : [];
+
+  return {
+    id,
+    title,
+    summary,
+    createdAt: String(raw.createdAt || new Date().toISOString()),
+    assignedBy: String(raw.assignedBy || 'Profesional KAIA').slice(0, 120),
+    tasks
+  };
 }
 
 const CLINICAL_KB = [
@@ -635,6 +671,63 @@ app.get('/appointments/all', (_, res) => {
   } catch (error) {
     return res.status(500).json({
       error: 'Fallo obteniendo agenda global',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.post('/treatments/sync-student', (req, res) => {
+  try {
+    const studentName = normalizeStudentName(req.body?.studentName);
+    const plans = Array.isArray(req.body?.plans)
+      ? req.body.plans.map(sanitizeTreatmentPlan).filter(Boolean)
+      : [];
+
+    if (!studentName) {
+      return res.status(400).json({ error: 'studentName es requerido' });
+    }
+
+    treatmentsByStudent.set(studentName, plans);
+    return res.json({ ok: true, studentName, count: plans.length });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo sincronizando tratamiento del estudiante',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.get('/treatments/by-student', (req, res) => {
+  try {
+    const studentName = normalizeStudentName(req.query?.studentName);
+    if (!studentName) {
+      return res.status(400).json({ error: 'studentName es requerido' });
+    }
+
+    return res.json({
+      ok: true,
+      studentName,
+      plans: treatmentsByStudent.get(studentName) || []
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo obteniendo tratamiento del estudiante',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.get('/treatments/all', (_, res) => {
+  try {
+    const students = Array.from(treatmentsByStudent.entries()).map(([studentName, plans]) => ({
+      studentName,
+      plans
+    }));
+
+    return res.json({ ok: true, students });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo obteniendo tratamientos globales',
       detail: error instanceof Error ? error.message : String(error)
     });
   }
