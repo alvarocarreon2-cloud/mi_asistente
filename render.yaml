@@ -21,3 +21,5 @@ services:
         value: gemini-2.0-flash
       - key: GEMINI_API_VERSION
         value: v1beta
+      - key: EVENT_RETENTION
+        value: 300

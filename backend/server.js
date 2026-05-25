@@ -29,6 +29,93 @@ const GEMINI_MODEL_CANDIDATES = [
   'gemini-1.5-flash'
 ];
 
+const MAX_EVENT_RETENTION = Number(process.env.EVENT_RETENTION || 300);
+let eventSequence = 0;
+const realtimeEvents = [];
+const appointmentsByStudent = new Map();
+
+function normalizePushRole(value) {
+  const role = String(value || '').trim().toLowerCase();
+  if (role === 'student' || role === 'professional') return role;
+  return '';
+}
+
+function normalizePushUserId(value) {
+  return String(value || '').trim().slice(0, 120);
+}
+
+function pushRealtimeEvent({ role, userId, title, detail, type, payload }) {
+  eventSequence += 1;
+  realtimeEvents.push({
+    id: eventSequence,
+    role,
+    userId,
+    title: String(title || '').slice(0, 120),
+    detail: String(detail || '').slice(0, 280),
+    type: String(type || 'generic').slice(0, 60),
+    payload: payload && typeof payload === 'object' ? payload : {},
+    createdAt: new Date().toISOString()
+  });
+
+  if (realtimeEvents.length > MAX_EVENT_RETENTION) {
+    realtimeEvents.splice(0, realtimeEvents.length - MAX_EVENT_RETENTION);
+  }
+}
+
+function pullRealtimeEvents({ role, userId, afterId }) {
+  return realtimeEvents.filter(
+    (event) =>
+      event.role === role &&
+      event.userId === userId &&
+      Number(event.id) > Number(afterId || 0)
+  );
+}
+
+function normalizeStudentName(value) {
+  return String(value || '').trim().slice(0, 120);
+}
+
+function normalizeAppointmentStatus(value) {
+  const status = String(value || '').trim().toLowerCase();
+  if (status === 'confirmed') return 'confirmed';
+  if (status === 'declined') return 'declined';
+  return 'pending';
+}
+
+function sanitizeStatusHistory(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => ({
+      status: normalizeAppointmentStatus(entry?.status),
+      actor: String(entry?.actor || 'system').slice(0, 32),
+      changedAt: String(entry?.changedAt || new Date().toISOString()),
+      note: String(entry?.note || '').slice(0, 280)
+    }))
+    .filter((entry) => Boolean(entry.changedAt));
+}
+
+function sanitizeAppointment(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id || '').trim().slice(0, 180);
+  const scheduledFor = String(raw.scheduledFor || '').trim();
+  const reason = String(raw.reason || '').trim().slice(0, 280);
+  if (!id || !scheduledFor || !reason) return null;
+
+  return {
+    id,
+    scheduledFor,
+    durationMinutes: Math.max(15, Math.min(360, Number(raw.durationMinutes) || 45)),
+    reason,
+    createdAt: String(raw.createdAt || new Date().toISOString()),
+    status: normalizeAppointmentStatus(raw.status),
+    statusHistory: sanitizeStatusHistory(raw.statusHistory)
+  };
+}
+
+function sortAppointments(items) {
+  return [...items].sort((a, b) => String(a.scheduledFor).localeCompare(String(b.scheduledFor)));
+}
+
 const CLINICAL_KB = [
   'WHO-5: 0-100, valores <=50 pueden indicar bienestar bajo y necesidad de seguimiento.',
   'PHQ-2: 0-6, valores >=3 sugieren cribado positivo para sintomas depresivos.',
@@ -69,6 +156,24 @@ function detectRiskSignals(text) {
 function mergeRisk(a, b) {
   const order = { low: 0, medium: 1, high: 2 };
   return order[a] >= order[b] ? a : b;
+}
+
+function resolveAiFirstRisk({ aiRisk, fallbackRisk, baselineRisk, hasAiRisk }) {
+  const normalizedBaseline = normalizeRisk(baselineRisk);
+  const normalizedFallback = normalizeRisk(fallbackRisk);
+  const normalizedAi = normalizeRisk(aiRisk);
+
+  // Keep a deterministic high-risk guardrail if any local safety rule saw
+  // explicitly critical content, but otherwise trust the model's semantic read.
+  if (normalizedFallback === 'high' || normalizedBaseline === 'high') {
+    return 'high';
+  }
+
+  if (hasAiRisk) {
+    return normalizedAi;
+  }
+
+  return mergeRisk(normalizedBaseline, normalizedFallback);
 }
 
 function fallbackWellbeingReply(message, risk) {
@@ -403,8 +508,136 @@ app.get('/health', (_, res) => {
     ok: true,
     providerPreference: AI_PROVIDER,
     hasGeminiKey: GEMINI_API_KEY.length > 0,
-    hasOpenAiKey: OPENAI_API_KEY.length > 0
+    hasOpenAiKey: OPENAI_API_KEY.length > 0,
+    realtimeEventsEnabled: true,
+    retainedEvents: realtimeEvents.length
   });
+});
+
+app.post('/events/publish', (req, res) => {
+  try {
+    const role = normalizePushRole(req.body?.role);
+    const userId = normalizePushUserId(req.body?.userId);
+    const title = String(req.body?.title || '').trim();
+    const detail = String(req.body?.detail || '').trim();
+    const type = String(req.body?.type || 'generic').trim();
+    const payload = req.body?.payload;
+
+    if (!role || !userId || !title || !detail) {
+      return res.status(400).json({
+        error: 'role, userId, title y detail son requeridos'
+      });
+    }
+
+    pushRealtimeEvent({ role, userId, title, detail, type, payload });
+
+    return res.json({
+      ok: true,
+      role,
+      userId,
+      latestEventId: eventSequence,
+      retainedEvents: realtimeEvents.length
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo publicando evento',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.get('/events/poll', (req, res) => {
+  try {
+    const role = normalizePushRole(req.query?.role);
+    const userId = normalizePushUserId(req.query?.userId);
+    const afterId = Number(req.query?.after || 0);
+
+    if (!role || !userId) {
+      return res.status(400).json({
+        error: 'role y userId son requeridos'
+      });
+    }
+
+    const events = pullRealtimeEvents({ role, userId, afterId });
+
+    return res.json({
+      ok: true,
+      events,
+      latestEventId: events.isNotEmpty
+        ? events[events.length - 1].id
+        : afterId
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo consultando eventos',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.post('/appointments/sync-student', (req, res) => {
+  try {
+    const studentName = normalizeStudentName(req.body?.studentName);
+    const appointments = Array.isArray(req.body?.appointments)
+      ? req.body.appointments.map(sanitizeAppointment).filter(Boolean)
+      : [];
+
+    if (!studentName) {
+      return res.status(400).json({ error: 'studentName es requerido' });
+    }
+
+    appointmentsByStudent.set(studentName, sortAppointments(appointments));
+    return res.json({
+      ok: true,
+      studentName,
+      count: appointments.length
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo sincronizando citas del estudiante',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.get('/appointments/by-student', (req, res) => {
+  try {
+    const studentName = normalizeStudentName(req.query?.studentName);
+    if (!studentName) {
+      return res.status(400).json({ error: 'studentName es requerido' });
+    }
+
+    const appointments = appointmentsByStudent.get(studentName) || [];
+    return res.json({
+      ok: true,
+      studentName,
+      appointments
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo obteniendo citas del estudiante',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.get('/appointments/all', (_, res) => {
+  try {
+    const students = Array.from(appointmentsByStudent.entries()).map(([studentName, appointments]) => ({
+      studentName,
+      appointments
+    }));
+
+    return res.json({
+      ok: true,
+      students
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo obteniendo agenda global',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
 });
 
 app.post('/ai/analyze', async (req, res) => {
@@ -594,23 +827,26 @@ app.post('/ai/wellbeing-chat', async (req, res) => {
 
     const prompt = analysisMode
       ? 'Eres un analista de bienestar escolar para profesionales. No diagnostiques. ' +
+        'Evalua el sentido completo del comentario, no solo palabras exactas. ' +
+        'Debes inferir gravedad desde contexto, intencionalidad, desesperanza, aislamiento, carga percibida, ideas de no seguir, despedida, autolesion directa o indirecta, y lenguaje coloquial o con rodeos. ' +
         'Explica de forma natural y detallada: que detectaste, por que lo consideras y que connotaciones tienen las frases del estudiante. ' +
         'En el campo rationale usa formato fijo por cada hallazgo: Frase detectada, Connotacion clinica, Por que importa y Accion sugerida. ' +
         'Devuelve SOLO JSON valido con estas llaves: ' +
         '{"replyText":"...","interpretation":"...","detectedFindings":["..."],"rationale":"...","evidenceTerms":["..."],"patterns":["..."],"detectedRisk":"low|medium|high","alerts":[{"title":"...","detail":"..."}]}. ' +
         `\nConocimiento clinico:\n- ${CLINICAL_KB.join('\n- ')}\n` +
-        `\nRiesgo preliminar ya detectado: ${detectedRisk}.\n` +
+        `\nRiesgo preliminar ya detectado: ${detectedRisk}. Usalo solo como contexto, no como respuesta final; puedes subirlo o bajarlo si el significado global del mensaje lo justifica.\n` +
         `${contextCheckIn}\n` +
         sensorBlock +
         `Historial reciente:\n${contextMessages || 'Sin historial'}\n` +
         `Comentario actual del estudiante: ${reflectionText}`
       : 'Eres un asistente de bienestar escolar para adolescentes. Tu rol es apoyo emocional breve, no diagnostico. ' +
+        'Antes de responder, evalua semanticamente la gravedad del mensaje completo y no dependas solo de palabras clave. ' +
         'Responde SIEMPRE en espanol neutro, 2-4 frases maximo, tono calido y concreto, y cierra con una sola pregunta util. ' +
         'Si hay riesgo alto, prioriza seguridad inmediata y contacto con adulto/profesional. ' +
         'Devuelve SOLO JSON valido con estas llaves: ' +
         '{"replyText":"...","detectedRisk":"low|medium|high","alerts":[{"title":"...","detail":"..."}]}.' +
         `\nConocimiento clinico:\n- ${CLINICAL_KB.join('\n- ')}\n` +
-        `\nRiesgo preliminar ya detectado: ${detectedRisk}.\n` +
+        `\nRiesgo preliminar ya detectado: ${detectedRisk}. Usalo solo como contexto, no como respuesta final; puedes subirlo o bajarlo si el significado global del mensaje lo justifica.\n` +
         `${contextCheckIn}\n` +
         sensorBlock +
         `Historial reciente:\n${contextMessages || 'Sin historial'}\n` +
@@ -637,13 +873,19 @@ app.post('/ai/wellbeing-chat', async (req, res) => {
       return res.status(502).json({ error: 'JSON invalido del proveedor IA' });
     }
 
+    const hasAiRisk = typeof ai?.detectedRisk === 'string' && ai.detectedRisk.trim().length > 0;
     const aiRisk = normalizeRisk(ai?.detectedRisk);
     const fallbackAnalysis = analyzeReflectionFallback({
       reflection: reflectionText,
       currentRisk,
       latestCheckIn
     });
-    const finalRisk = mergeRisk(mergeRisk(detectedRisk, aiRisk), normalizeRisk(fallbackAnalysis.data.detectedRisk));
+    const finalRisk = resolveAiFirstRisk({
+      aiRisk,
+      fallbackRisk: fallbackAnalysis.data.detectedRisk,
+      baselineRisk: detectedRisk,
+      hasAiRisk
+    });
     const aiAlerts = Array.isArray(ai?.alerts)
       ? ai.alerts
           .slice(0, 2)
@@ -754,10 +996,10 @@ app.post('/ai/wellbeing-reflection', async (req, res) => {
       ? `Sensores del dia: sueno=${Number(sensorContext?.sleepHours ?? 0)}h, pantalla=${Number(sensorContext?.screenMinutes ?? 0)}min, pasos=${Number(sensorContext?.steps ?? 0)}, FC reposo=${Number(sensorContext?.restingHeartRate ?? 0)} bpm.`
       : 'Sin senales de sensores disponibles.';
 
-    const prompt = `Eres un analista de bienestar escolar. Responde solo JSON valido con estas llaves: {"interpretation":"...","detectedFindings":["..."],"rationale":"...","evidenceTerms":["..."],"patterns":["..."],"detectedRisk":"low|medium|high","alerts":[{"title":"...","detail":"..."}]}. Tu respuesta debe ser natural, detallada y clara para un profesional. Explica que detectaste y por que. No diagnostiques.
+    const prompt = `Eres un analista de bienestar escolar. Responde solo JSON valido con estas llaves: {"interpretation":"...","detectedFindings":["..."],"rationale":"...","evidenceTerms":["..."],"patterns":["..."],"detectedRisk":"low|medium|high","alerts":[{"title":"...","detail":"..."}]}. Tu respuesta debe ser natural, detallada y clara para un profesional. Explica que detectaste y por que. No diagnostiques. Debes evaluar el significado global del comentario y no depender solo de palabras exactas. Interpreta lenguaje coloquial, rodeos, desesperanza, intencion de dano, perdida de futuro, carga percibida, aislamiento, despedida y senales indirectas de riesgo.
 Conocimiento clinico:
 - ${CLINICAL_KB.join('\n- ')}
-Riesgo preliminar: ${currentRisk}.
+  Riesgo preliminar: ${currentRisk}. Usalo solo como contexto, no como respuesta final; puedes subirlo o bajarlo si el significado global del mensaje lo justifica.
 ${checkInBlock}
 ${sensorBlock}
 Reflexiones recientes:
@@ -777,8 +1019,14 @@ Comentario actual: ${reflection}`;
       return res.json(fallbackData);
     }
 
+    const hasAiRisk = typeof ai?.detectedRisk === 'string' && ai.detectedRisk.trim().length > 0;
     const aiRisk = normalizeRisk(ai?.detectedRisk || fallbackData.data.detectedRisk);
-    const detectedRisk = mergeRisk(fallbackData.data.detectedRisk, aiRisk);
+    const detectedRisk = resolveAiFirstRisk({
+      aiRisk,
+      fallbackRisk: fallbackData.data.detectedRisk,
+      baselineRisk: currentRisk,
+      hasAiRisk
+    });
     const evidenceTerms = Array.isArray(ai?.evidenceTerms) && ai.evidenceTerms.length
       ? ai.evidenceTerms.map((e) => String(e).trim()).filter(Boolean)
       : fallbackData.data.evidenceTerms;
