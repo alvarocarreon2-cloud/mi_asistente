@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'student_extra_screens.dart';
 
 enum AppRole { student, professional }
 
@@ -132,10 +133,7 @@ class RealtimePollResult {
   final List<RealtimeEventItem> events;
   final int latestEventId;
 
-  const RealtimePollResult({
-    required this.events,
-    required this.latestEventId,
-  });
+  const RealtimePollResult({required this.events, required this.latestEventId});
 }
 
 class RealtimeEventItem {
@@ -165,20 +163,17 @@ class PushBridgeService {
     final hh = startsAt.hour.toString().padLeft(2, '0');
     final mm = startsAt.minute.toString().padLeft(2, '0');
 
-    await _post(
-      '/events/publish',
-      {
-        'role': 'student',
-        'userId': userId,
-        'title': 'Nueva cita pendiente',
-        'detail': 'Tienes cita a las $hh:$mm. Motivo: $reason',
-        'type': 'appointment_created',
-        'payload': {
-          'appointmentId': appointmentId,
-          'startsAtIso': startsAt.toIso8601String(),
-        },
+    await _post('/events/publish', {
+      'role': 'student',
+      'userId': userId,
+      'title': 'Nueva cita pendiente',
+      'detail': 'Tienes cita a las $hh:$mm. Motivo: $reason',
+      'type': 'appointment_created',
+      'payload': {
+        'appointmentId': appointmentId,
+        'startsAtIso': startsAt.toIso8601String(),
       },
-    );
+    });
   }
 
   Future<void> notifyAppointmentResponse({
@@ -191,21 +186,18 @@ class PushBridgeService {
         ? 'confirmo la cita'
         : 'indico que no puede asistir';
 
-    await _post(
-      '/events/publish',
-      {
-        'role': 'professional',
-        'userId': userId,
-        'title': 'Respuesta de cita',
-        'detail': '$studentName $statusLabel.',
-        'type': 'appointment_response',
-        'payload': {
-          'appointmentId': appointmentId,
-          'status': status.name,
-          'studentName': studentName,
-        },
+    await _post('/events/publish', {
+      'role': 'professional',
+      'userId': userId,
+      'title': 'Respuesta de cita',
+      'detail': '$studentName $statusLabel.',
+      'type': 'appointment_response',
+      'payload': {
+        'appointmentId': appointmentId,
+        'status': status.name,
+        'studentName': studentName,
       },
-    );
+    });
   }
 
   Future<RealtimePollResult> pollEvents({
@@ -224,25 +216,33 @@ class PushBridgeService {
     try {
       final response = await http.get(uri);
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        return RealtimePollResult(events: const [], latestEventId: afterEventId);
+        return RealtimePollResult(
+          events: const [],
+          latestEventId: afterEventId,
+        );
       }
 
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) {
-        return RealtimePollResult(events: const [], latestEventId: afterEventId);
+        return RealtimePollResult(
+          events: const [],
+          latestEventId: afterEventId,
+        );
       }
 
       final rawEvents = decoded['events'];
       final events = rawEvents is List
           ? rawEvents
-              .whereType<Map<String, dynamic>>()
-              .map((raw) => RealtimeEventItem(
+                .whereType<Map<String, dynamic>>()
+                .map(
+                  (raw) => RealtimeEventItem(
                     id: (raw['id'] is num) ? (raw['id'] as num).toInt() : 0,
-              title: (raw['title'] ?? '').toString().trim(),
-              detail: (raw['detail'] ?? '').toString().trim(),
-                  ))
-              .where((event) => event.id > 0 && event.title.isNotEmpty)
-              .toList()
+                    title: (raw['title'] ?? '').toString().trim(),
+                    detail: (raw['detail'] ?? '').toString().trim(),
+                  ),
+                )
+                .where((event) => event.id > 0 && event.title.isNotEmpty)
+                .toList()
           : const <RealtimeEventItem>[];
 
       final latest = decoded['latestEventId'];
@@ -257,25 +257,24 @@ class PushBridgeService {
     required String studentName,
     required List<Map<String, dynamic>> appointments,
   }) async {
-    await _post(
-      '/appointments/sync-student',
-      {
-        'studentName': studentName,
-        'appointments': appointments,
-      },
-    );
+    await _post('/appointments/sync-student', {
+      'studentName': studentName,
+      'appointments': appointments,
+    });
   }
 
   Future<List<Map<String, dynamic>>> fetchAppointmentsByStudent({
     required String studentName,
   }) async {
-    final uri = _uriFor('/appointments/by-student').replace(
-      queryParameters: {'studentName': studentName},
-    );
+    final uri = _uriFor(
+      '/appointments/by-student',
+    ).replace(queryParameters: {'studentName': studentName});
 
     try {
       final response = await http.get(uri);
-      if (response.statusCode < 200 || response.statusCode >= 300) return const [];
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const [];
+      }
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) return const [];
       final raw = decoded['appointments'];
@@ -290,7 +289,9 @@ class PushBridgeService {
     final uri = _uriFor('/appointments/all');
     try {
       final response = await http.get(uri);
-      if (response.statusCode < 200 || response.statusCode >= 300) return const {};
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const {};
+      }
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) return const {};
       final rawStudents = decoded['students'];
@@ -305,7 +306,9 @@ class PushBridgeService {
           result[name] = const [];
           continue;
         }
-        result[name] = rawAppointments.whereType<Map<String, dynamic>>().toList();
+        result[name] = rawAppointments
+            .whereType<Map<String, dynamic>>()
+            .toList();
       }
       return result;
     } catch (_) {
@@ -317,25 +320,24 @@ class PushBridgeService {
     required String studentName,
     required List<Map<String, dynamic>> plans,
   }) async {
-    await _post(
-      '/treatments/sync-student',
-      {
-        'studentName': studentName,
-        'plans': plans,
-      },
-    );
+    await _post('/treatments/sync-student', {
+      'studentName': studentName,
+      'plans': plans,
+    });
   }
 
   Future<List<Map<String, dynamic>>> fetchTreatmentPlansByStudent({
     required String studentName,
   }) async {
-    final uri = _uriFor('/treatments/by-student').replace(
-      queryParameters: {'studentName': studentName},
-    );
+    final uri = _uriFor(
+      '/treatments/by-student',
+    ).replace(queryParameters: {'studentName': studentName});
 
     try {
       final response = await http.get(uri);
-      if (response.statusCode < 200 || response.statusCode >= 300) return const [];
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const [];
+      }
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) return const [];
       final raw = decoded['plans'];
@@ -346,11 +348,14 @@ class PushBridgeService {
     }
   }
 
-  Future<Map<String, List<Map<String, dynamic>>>> fetchAllTreatmentPlans() async {
+  Future<Map<String, List<Map<String, dynamic>>>>
+  fetchAllTreatmentPlans() async {
     final uri = _uriFor('/treatments/all');
     try {
       final response = await http.get(uri);
-      if (response.statusCode < 200 || response.statusCode >= 300) return const {};
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const {};
+      }
       final decoded = jsonDecode(response.body);
       if (decoded is! Map<String, dynamic>) return const {};
       final rawStudents = decoded['students'];
@@ -373,9 +378,135 @@ class PushBridgeService {
     }
   }
 
+  Future<void> syncStudentCheckIns({
+    required String studentName,
+    required List<Map<String, dynamic>> checkIns,
+  }) async {
+    await _post('/checkins/sync-student', {
+      'studentName': studentName,
+      'checkIns': checkIns,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> fetchCheckInsByStudent({
+    required String studentName,
+  }) async {
+    final uri = _uriFor(
+      '/checkins/by-student',
+    ).replace(queryParameters: {'studentName': studentName});
+
+    try {
+      final response = await http.get(uri);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const [];
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return const [];
+      final raw = decoded['checkIns'];
+      if (raw is! List) return const [];
+      return raw.whereType<Map<String, dynamic>>().toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<Map<String, List<Map<String, dynamic>>>> fetchAllCheckIns() async {
+    final uri = _uriFor('/checkins/all');
+    try {
+      final response = await http.get(uri);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const {};
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return const {};
+      final rawStudents = decoded['students'];
+      if (rawStudents is! List) return const {};
+
+      final result = <String, List<Map<String, dynamic>>>{};
+      for (final item in rawStudents.whereType<Map<String, dynamic>>()) {
+        final name = (item['studentName'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
+        final rawCheckIns = item['checkIns'];
+        if (rawCheckIns is! List) {
+          result[name] = const [];
+          continue;
+        }
+        result[name] = rawCheckIns.whereType<Map<String, dynamic>>().toList();
+      }
+      return result;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  Future<void> syncStudentReflections({
+    required String studentName,
+    required List<Map<String, dynamic>> reflections,
+  }) async {
+    await _post('/reflections/sync-student', {
+      'studentName': studentName,
+      'reflections': reflections,
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> fetchReflectionsByStudent({
+    required String studentName,
+  }) async {
+    final uri = _uriFor(
+      '/reflections/by-student',
+    ).replace(queryParameters: {'studentName': studentName});
+
+    try {
+      final response = await http.get(uri);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const [];
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return const [];
+      final raw = decoded['reflections'];
+      if (raw is! List) return const [];
+      return raw.whereType<Map<String, dynamic>>().toList();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<Map<String, List<Map<String, dynamic>>>> fetchAllReflections() async {
+    final uri = _uriFor('/reflections/all');
+    try {
+      final response = await http.get(uri);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return const {};
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return const {};
+      final rawStudents = decoded['students'];
+      if (rawStudents is! List) return const {};
+
+      final result = <String, List<Map<String, dynamic>>>{};
+      for (final item in rawStudents.whereType<Map<String, dynamic>>()) {
+        final name = (item['studentName'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
+        final rawReflections = item['reflections'];
+        if (rawReflections is! List) {
+          result[name] = const [];
+          continue;
+        }
+        result[name] =
+            rawReflections.whereType<Map<String, dynamic>>().toList();
+      }
+      return result;
+    } catch (_) {
+      return const {};
+    }
+  }
+
   Uri _uriFor(String path) {
     final base = _defaultPublicBackendUrl.endsWith('/')
-        ? _defaultPublicBackendUrl.substring(0, _defaultPublicBackendUrl.length - 1)
+        ? _defaultPublicBackendUrl.substring(
+            0,
+            _defaultPublicBackendUrl.length - 1,
+          )
         : _defaultPublicBackendUrl;
     return Uri.parse('$base$path');
   }
@@ -419,6 +550,8 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
   late final List<StudentCase> _demoStudents;
   final Map<String, List<ProfessionalAppointment>> _appointmentsByStudent = {};
   final Map<String, List<TreatmentPlan>> _treatmentsByStudent = {};
+  final Map<String, List<DailyCheckIn>> _checkInsByStudent = {};
+  final Map<String, List<StudentReflection>> _reflectionsByStudent = {};
   final List<ProfessionalAgendaNotification> _professionalNotifications = [];
 
   @override
@@ -469,11 +602,17 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
         ),
       ),
     ];
-    _appointmentsByStudent[_studentCase.studentName] = _studentCase.appointments;
-    _treatmentsByStudent[_studentCase.studentName] = _studentCase.treatmentPlans;
+    _appointmentsByStudent[_studentCase.studentName] =
+        _studentCase.appointments;
+    _treatmentsByStudent[_studentCase.studentName] =
+        _studentCase.treatmentPlans;
+    _checkInsByStudent[_studentCase.studentName] = _studentCase.checkIns;
+    _reflectionsByStudent[_studentCase.studentName] = _studentCase.reflections;
     for (final demo in _demoStudents) {
       _appointmentsByStudent[demo.studentName] = demo.appointments;
       _treatmentsByStudent[demo.studentName] = demo.treatmentPlans;
+      _checkInsByStudent[demo.studentName] = demo.checkIns;
+      _reflectionsByStudent[demo.studentName] = demo.reflections;
     }
     _loadSavedRole();
   }
@@ -517,17 +656,20 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
   }
 
   List<StudentCase> get _professionalStudents {
-    final students = [
-      _studentCase,
-      ..._demoStudents,
-    ];
+    final students = [_studentCase, ..._demoStudents];
 
     final withAppointments = students.map((student) {
-      final appointments = _appointmentsByStudent[student.studentName] ??
-          student.appointments;
-      final treatmentPlans = _treatmentsByStudent[student.studentName] ??
-          student.treatmentPlans;
+      final appointments =
+          _appointmentsByStudent[student.studentName] ?? student.appointments;
+      final treatmentPlans =
+          _treatmentsByStudent[student.studentName] ?? student.treatmentPlans;
+      final checkIns =
+          _checkInsByStudent[student.studentName] ?? student.checkIns;
+      final reflections =
+          _reflectionsByStudent[student.studentName] ?? student.reflections;
       return student.copyWith(
+        checkIns: checkIns,
+        reflections: reflections,
         appointments: appointments,
         treatmentPlans: treatmentPlans,
       );
@@ -560,30 +702,69 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
   }
 
   void _onCheckInCompleted(DailyCheckIn checkIn) {
+    final updatedCheckIns = [..._studentCase.checkIns, checkIn];
     setState(() {
       _studentCase = _studentCase.copyWith(
-        checkIns: [..._studentCase.checkIns, checkIn],
+        checkIns: updatedCheckIns,
         riskLevel: _mergeRisk(_studentCase.riskLevel, checkIn.riskLevel),
       );
-      _appointmentsByStudent[_studentCase.studentName] = _studentCase.appointments;
-      _treatmentsByStudent[_studentCase.studentName] = _studentCase.treatmentPlans;
+      _appointmentsByStudent[_studentCase.studentName] =
+          _studentCase.appointments;
+      _treatmentsByStudent[_studentCase.studentName] =
+          _studentCase.treatmentPlans;
+      _checkInsByStudent[_studentCase.studentName] = updatedCheckIns;
+      _reflectionsByStudent[_studentCase.studentName] = _studentCase.reflections;
     });
+
+    unawaited(
+      _syncStudentCheckInsToBackend(
+        studentName: _studentCase.studentName,
+        checkIns: updatedCheckIns,
+      ),
+    );
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'KAIA: Gracias por tu check-in. Ya lo guardé y seguimos acompañándote.',
+        ),
+      ),
+    );
   }
 
   void _onReflectionSubmitted(ReflectionAnalysis analysis) {
+    final updatedReflections = [
+      ..._studentCase.reflections,
+      analysis.reflection,
+    ];
     setState(() {
       _studentCase = _studentCase.copyWith(
-        reflections: [..._studentCase.reflections, analysis.reflection],
+        reflections: updatedReflections,
         alerts: [..._studentCase.alerts, ...analysis.newAlerts],
         riskLevel: _mergeRisk(_studentCase.riskLevel, analysis.caseRisk),
       );
-      _appointmentsByStudent[_studentCase.studentName] = _studentCase.appointments;
-      _treatmentsByStudent[_studentCase.studentName] = _studentCase.treatmentPlans;
+      _appointmentsByStudent[_studentCase.studentName] =
+          _studentCase.appointments;
+      _treatmentsByStudent[_studentCase.studentName] =
+          _studentCase.treatmentPlans;
+      _checkInsByStudent[_studentCase.studentName] = _studentCase.checkIns;
+      _reflectionsByStudent[_studentCase.studentName] = updatedReflections;
     });
+
+    unawaited(
+      _syncStudentReflectionsToBackend(
+        studentName: _studentCase.studentName,
+        reflections: updatedReflections,
+      ),
+    );
   }
 
-  Future<void> _assignTreatmentPlan(TreatmentPlan plan, String studentName) async {
-    final current = _treatmentsByStudent[studentName] ?? const <TreatmentPlan>[];
+  Future<void> _assignTreatmentPlan(
+    TreatmentPlan plan,
+    String studentName,
+  ) async {
+    final current =
+        _treatmentsByStudent[studentName] ?? const <TreatmentPlan>[];
     final updated = [
       plan,
       ...current.where((existing) => existing.id != plan.id),
@@ -596,7 +777,10 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
       }
     });
 
-    await _syncTreatmentPlansToBackend(studentName: studentName, plans: updated);
+    await _syncTreatmentPlansToBackend(
+      studentName: studentName,
+      plans: updated,
+    );
     unawaited(
       _publishTreatmentEvent(
         role: 'student',
@@ -613,7 +797,8 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
     required String taskId,
     required bool completed,
   }) async {
-    final current = _treatmentsByStudent[studentName] ?? const <TreatmentPlan>[];
+    final current =
+        _treatmentsByStudent[studentName] ?? const <TreatmentPlan>[];
     final updated = current.map((plan) {
       if (plan.id != planId) return plan;
       final tasks = plan.tasks.map((task) {
@@ -633,7 +818,10 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
       }
     });
 
-    await _syncTreatmentPlansToBackend(studentName: studentName, plans: updated);
+    await _syncTreatmentPlansToBackend(
+      studentName: studentName,
+      plans: updated,
+    );
     unawaited(
       _publishTreatmentEvent(
         role: 'professional',
@@ -648,8 +836,8 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
 
   void _onStudentAppointmentResponse(AppointmentStudentResponse response) {
     final currentStudentName = _studentCase.studentName;
-    final current = _appointmentsByStudent[currentStudentName] ??
-        _studentCase.appointments;
+    final current =
+        _appointmentsByStudent[currentStudentName] ?? _studentCase.appointments;
 
     ProfessionalAppointment? previous;
     final updated = current.map((appointment) {
@@ -672,10 +860,10 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
           ),
         ],
       );
-    }).toList()
-      ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
+    }).toList()..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
 
-    final didChangeStatus = previous != null && previous!.status != response.status;
+    final didChangeStatus =
+        previous != null && previous!.status != response.status;
 
     final updatedAlerts = didChangeStatus
         ? [
@@ -824,46 +1012,70 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
     }
 
     if (_activeRole == null) {
-      return RoleAccessScreen(onRoleSelected: _setRole);
+      return KaiaLoginScreen(
+        onLoginAsStudent: () => _setRole(AppRole.student),
+        onLoginAsProfessional: () => _setRole(AppRole.professional),
+      );
     }
 
     final isStudent = _activeRole == AppRole.student;
 
-    final body = isStudent
-        ? (!_checkInCompletedToday
-              ? DailyCheckInScreen(onCompleted: _onCheckInCompleted)
-              : StudentAiHome(
-                  studentCase: _studentCase,
-                  onReflectionSubmitted: _onReflectionSubmitted,
-                  onAppointmentResponse: _onStudentAppointmentResponse,
-                  onToggleTreatmentTask: (planId, taskId, completed) =>
-                      _toggleTreatmentTask(
-                        studentName: _studentCase.studentName,
-                        planId: planId,
-                        taskId: taskId,
-                        completed: completed,
-                      ),
-                ))
-        : ProfessionalDashboard(
-            students: _professionalStudents,
-            onScheduleAppointment: _scheduleAppointment,
-            notifications: _professionalNotifications,
-            onAssignTreatmentPlan: _assignTreatmentPlan,
-          );
+    // Student: daily check-in gate
+    if (isStudent && !_checkInCompletedToday) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('KAIA · Check-in diario'),
+          actions: [
+            IconButton(
+              tooltip: widget.isDarkMode ? 'Modo claro' : 'Modo oscuro',
+              onPressed: widget.onToggleThemeMode,
+              icon: Icon(
+                widget.isDarkMode
+                    ? Icons.light_mode_rounded
+                    : Icons.dark_mode_rounded,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Cambiar perfil',
+              onPressed: _logoutRole,
+              icon: const Icon(Icons.logout_rounded),
+            ),
+          ],
+        ),
+        body: DailyCheckInScreen(onCompleted: _onCheckInCompleted),
+      );
+    }
+
+    // Student: main home (full Scaffold owned by StudentAiHome)
+    if (isStudent) {
+      return StudentAiHome(
+        studentCase: _studentCase,
+        onReflectionSubmitted: _onReflectionSubmitted,
+        onAppointmentResponse: _onStudentAppointmentResponse,
+        onToggleTreatmentTask: (planId, taskId, completed) =>
+            _toggleTreatmentTask(
+              studentName: _studentCase.studentName,
+              planId: planId,
+              taskId: taskId,
+              completed: completed,
+            ),
+        isDarkMode: widget.isDarkMode,
+        onToggleThemeMode: widget.onToggleThemeMode,
+        onLogout: _logoutRole,
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          isStudent
-              ? 'Seguimiento del Alumno'
-              : 'Dashboard Profesional',
-        ),
+        title: const Text('Dashboard Profesional'),
         actions: [
           IconButton(
             tooltip: widget.isDarkMode ? 'Modo claro' : 'Modo oscuro',
             onPressed: widget.onToggleThemeMode,
             icon: Icon(
-              widget.isDarkMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              widget.isDarkMode
+                  ? Icons.light_mode_rounded
+                  : Icons.dark_mode_rounded,
             ),
           ),
           IconButton(
@@ -873,7 +1085,12 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
           ),
         ],
       ),
-      body: body,
+      body: ProfessionalDashboard(
+        students: _professionalStudents,
+        onScheduleAppointment: _scheduleAppointment,
+        notifications: _professionalNotifications,
+        onAssignTreatmentPlan: _assignTreatmentPlan,
+      ),
     );
   }
 
@@ -890,13 +1107,10 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
 
     unawaited(_pollRealtimeEventsOnce());
     unawaited(_syncAppointmentsFromBackendOnce());
-    _realtimePollTimer = Timer.periodic(
-      const Duration(seconds: 8),
-      (_) {
-        unawaited(_pollRealtimeEventsOnce());
-        unawaited(_syncAppointmentsFromBackendOnce());
-      },
-    );
+    _realtimePollTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+      unawaited(_pollRealtimeEventsOnce());
+      unawaited(_syncAppointmentsFromBackendOnce());
+    });
   }
 
   Future<void> _pollRealtimeEventsOnce() async {
@@ -944,22 +1158,39 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
     );
   }
 
+  Future<void> _syncStudentCheckInsToBackend({
+    required String studentName,
+    required List<DailyCheckIn> checkIns,
+  }) async {
+    await _pushBridgeService.syncStudentCheckIns(
+      studentName: studentName,
+      checkIns: checkIns.map(_checkInToJson).toList(),
+    );
+  }
+
+  Future<void> _syncStudentReflectionsToBackend({
+    required String studentName,
+    required List<StudentReflection> reflections,
+  }) async {
+    await _pushBridgeService.syncStudentReflections(
+      studentName: studentName,
+      reflections: reflections.map(_reflectionToJson).toList(),
+    );
+  }
+
   Future<void> _publishTreatmentEvent({
     required String role,
     required String userId,
     required String title,
     required String detail,
   }) async {
-    await _pushBridgeService._post(
-      '/events/publish',
-      {
-        'role': role,
-        'userId': userId,
-        'title': title,
-        'detail': detail,
-        'type': 'treatment_update',
-      },
-    );
+    await _pushBridgeService._post('/events/publish', {
+      'role': role,
+      'userId': userId,
+      'title': title,
+      'detail': detail,
+      'type': 'treatment_update',
+    });
   }
 
   Future<void> _syncAppointmentsFromBackendOnce() async {
@@ -970,15 +1201,48 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
       final rawPlans = await _pushBridgeService.fetchTreatmentPlansByStudent(
         studentName: _studentCase.studentName,
       );
-      final parsed = rawList.map(_appointmentFromJson).whereType<ProfessionalAppointment>().toList()
-        ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
-      final parsedPlans = rawPlans.map(_treatmentPlanFromJson).whereType<TreatmentPlan>().toList();
+      final rawCheckIns = await _pushBridgeService.fetchCheckInsByStudent(
+        studentName: _studentCase.studentName,
+      );
+      final rawReflections = await _pushBridgeService.fetchReflectionsByStudent(
+        studentName: _studentCase.studentName,
+      );
+      final parsed =
+          rawList
+              .map(_appointmentFromJson)
+              .whereType<ProfessionalAppointment>()
+              .toList()
+            ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
+      final parsedPlans = rawPlans
+          .map(_treatmentPlanFromJson)
+          .whereType<TreatmentPlan>()
+          .toList();
+      final parsedCheckIns = rawCheckIns
+          .map(_checkInFromJson)
+          .whereType<DailyCheckIn>()
+          .toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+      final parsedReflections = rawReflections
+          .map(_reflectionFromJson)
+          .whereType<StudentReflection>()
+          .toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      final effectiveCheckIns = parsedCheckIns.isEmpty
+          ? _studentCase.checkIns
+          : parsedCheckIns;
+      final effectiveReflections = parsedReflections.isEmpty
+          ? _studentCase.reflections
+          : parsedReflections;
 
       if (!mounted) return;
       setState(() {
         _appointmentsByStudent[_studentCase.studentName] = parsed;
         _treatmentsByStudent[_studentCase.studentName] = parsedPlans;
+        _checkInsByStudent[_studentCase.studentName] = effectiveCheckIns;
+        _reflectionsByStudent[_studentCase.studentName] = effectiveReflections;
         _studentCase = _studentCase.copyWith(
+          checkIns: effectiveCheckIns,
+          reflections: effectiveReflections,
           appointments: parsed,
           treatmentPlans: parsedPlans,
         );
@@ -989,14 +1253,17 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
     if (_activeRole == AppRole.professional) {
       final all = await _pushBridgeService.fetchAllAppointments();
       final allPlans = await _pushBridgeService.fetchAllTreatmentPlans();
+      final allCheckIns = await _pushBridgeService.fetchAllCheckIns();
+      final allReflections = await _pushBridgeService.fetchAllReflections();
       if (!mounted) return;
       setState(() {
         all.forEach((studentName, rawAppointments) {
-          final parsed = rawAppointments
-              .map(_appointmentFromJson)
-              .whereType<ProfessionalAppointment>()
-              .toList()
-            ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
+          final parsed =
+              rawAppointments
+                  .map(_appointmentFromJson)
+                  .whereType<ProfessionalAppointment>()
+                  .toList()
+                ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
           _appointmentsByStudent[studentName] = parsed;
           if (studentName == _studentCase.studentName) {
             _studentCase = _studentCase.copyWith(appointments: parsed);
@@ -1010,6 +1277,30 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
           _treatmentsByStudent[studentName] = parsedPlans;
           if (studentName == _studentCase.studentName) {
             _studentCase = _studentCase.copyWith(treatmentPlans: parsedPlans);
+          }
+        });
+        allCheckIns.forEach((studentName, rawCheckIns) {
+          final parsedCheckIns = rawCheckIns
+              .map(_checkInFromJson)
+              .whereType<DailyCheckIn>()
+              .toList()
+            ..sort((a, b) => a.date.compareTo(b.date));
+          _checkInsByStudent[studentName] = parsedCheckIns;
+          if (studentName == _studentCase.studentName) {
+            _studentCase = _studentCase.copyWith(checkIns: parsedCheckIns);
+          }
+        });
+        allReflections.forEach((studentName, rawReflections) {
+          final parsedReflections = rawReflections
+              .map(_reflectionFromJson)
+              .whereType<StudentReflection>()
+              .toList()
+            ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+          _reflectionsByStudent[studentName] = parsedReflections;
+          if (studentName == _studentCase.studentName) {
+            _studentCase = _studentCase.copyWith(
+              reflections: parsedReflections,
+            );
           }
         });
       });
@@ -1050,19 +1341,17 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
     final status = _statusFromString((raw['status'] ?? '').toString());
     final rawHistory = raw['statusHistory'];
     final history = rawHistory is List
-        ? rawHistory
-            .whereType<Map<String, dynamic>>()
-            .map((eventRaw) {
-              final changedAt = DateTime.tryParse((eventRaw['changedAt'] ?? '').toString()) ??
-                  DateTime.now();
-              return AppointmentStatusEvent(
-                status: _statusFromString((eventRaw['status'] ?? '').toString()),
-                actor: _actorFromString((eventRaw['actor'] ?? '').toString()),
-                changedAt: changedAt,
-                note: (eventRaw['note'] ?? '').toString(),
-              );
-            })
-            .toList()
+        ? rawHistory.whereType<Map<String, dynamic>>().map((eventRaw) {
+            final changedAt =
+                DateTime.tryParse((eventRaw['changedAt'] ?? '').toString()) ??
+                DateTime.now();
+            return AppointmentStatusEvent(
+              status: _statusFromString((eventRaw['status'] ?? '').toString()),
+              actor: _actorFromString((eventRaw['actor'] ?? '').toString()),
+              changedAt: changedAt,
+              note: (eventRaw['note'] ?? '').toString(),
+            );
+          }).toList()
         : <AppointmentStatusEvent>[];
 
     return ProfessionalAppointment(
@@ -1124,19 +1413,25 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
     final id = (raw['id'] ?? '').toString().trim();
     final title = (raw['title'] ?? '').toString().trim();
     if (id.isEmpty || title.isEmpty) return null;
-    final createdAt = DateTime.tryParse((raw['createdAt'] ?? '').toString()) ?? DateTime.now();
+    final createdAt =
+        DateTime.tryParse((raw['createdAt'] ?? '').toString()) ??
+        DateTime.now();
     final rawTasks = raw['tasks'];
     final tasks = rawTasks is List
-        ? rawTasks.whereType<Map<String, dynamic>>().map((taskRaw) {
-            return TreatmentTask(
-              id: (taskRaw['id'] ?? '').toString(),
-              title: (taskRaw['title'] ?? '').toString(),
-              completed: taskRaw['completed'] == true,
-              completedAt: taskRaw['completedAt'] == null
-                  ? null
-                  : DateTime.tryParse(taskRaw['completedAt'].toString()),
-            );
-          }).where((task) => task.id.isNotEmpty && task.title.isNotEmpty).toList()
+        ? rawTasks
+              .whereType<Map<String, dynamic>>()
+              .map((taskRaw) {
+                return TreatmentTask(
+                  id: (taskRaw['id'] ?? '').toString(),
+                  title: (taskRaw['title'] ?? '').toString(),
+                  completed: taskRaw['completed'] == true,
+                  completedAt: taskRaw['completedAt'] == null
+                      ? null
+                      : DateTime.tryParse(taskRaw['completedAt'].toString()),
+                );
+              })
+              .where((task) => task.id.isNotEmpty && task.title.isNotEmpty)
+              .toList()
         : <TreatmentTask>[];
 
     return TreatmentPlan(
@@ -1147,6 +1442,110 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
       assignedBy: (raw['assignedBy'] ?? 'Profesional KAIA').toString(),
       tasks: tasks,
     );
+  }
+
+  Map<String, dynamic> _checkInToJson(DailyCheckIn checkIn) {
+    return {
+      'date': checkIn.date.toIso8601String(),
+      'answers': checkIn.answers,
+      'wellbeingScore': checkIn.wellbeingScore,
+      'riskLevel': checkIn.riskLevel.name,
+      'summary': checkIn.summary,
+      'who5Percent': checkIn.who5Percent,
+      'phq2Score': checkIn.phq2Score,
+      'gad2Score': checkIn.gad2Score,
+    };
+  }
+
+  DailyCheckIn? _checkInFromJson(Map<String, dynamic> raw) {
+    final dateRaw = (raw['date'] ?? '').toString().trim();
+    final date = DateTime.tryParse(dateRaw);
+    if (date == null) return null;
+
+    final answersRaw = raw['answers'];
+    final answers = <int, int>{};
+    if (answersRaw is Map) {
+      answersRaw.forEach((key, value) {
+        final i = int.tryParse(key.toString());
+        final v = int.tryParse(value.toString());
+        if (i != null && v != null) {
+          answers[i] = v;
+        }
+      });
+    }
+
+    return DailyCheckIn(
+      date: date,
+      answers: answers,
+      wellbeingScore: (raw['wellbeingScore'] is num)
+          ? (raw['wellbeingScore'] as num).toInt()
+          : 0,
+      riskLevel: _riskLevelFromString((raw['riskLevel'] ?? '').toString()),
+      summary: (raw['summary'] ?? '').toString(),
+      who5Percent: (raw['who5Percent'] is num)
+          ? (raw['who5Percent'] as num).toInt()
+          : 0,
+      phq2Score: (raw['phq2Score'] is num)
+          ? (raw['phq2Score'] as num).toInt()
+          : 0,
+      gad2Score: (raw['gad2Score'] is num)
+          ? (raw['gad2Score'] as num).toInt()
+          : 0,
+    );
+  }
+
+  Map<String, dynamic> _reflectionToJson(StudentReflection reflection) {
+    return {
+      'text': reflection.text,
+      'createdAt': reflection.createdAt.toIso8601String(),
+      'patterns': reflection.patterns,
+      'interpretation': reflection.interpretation,
+      'detectedFindings': reflection.detectedFindings,
+      'rationale': reflection.rationale,
+      'evidenceTerms': reflection.evidenceTerms,
+      'reasoningSummary': reflection.reasoningSummary,
+      'source': reflection.source,
+      'detectedRisk': reflection.detectedRisk.name,
+    };
+  }
+
+  StudentReflection? _reflectionFromJson(Map<String, dynamic> raw) {
+    final text = (raw['text'] ?? '').toString().trim();
+    final createdAtRaw = (raw['createdAt'] ?? '').toString().trim();
+    final createdAt = DateTime.tryParse(createdAtRaw);
+    if (text.isEmpty || createdAt == null) return null;
+
+    List<String> listOf(dynamic value) {
+      if (value is! List) return const [];
+      return value
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .toList();
+    }
+
+    return StudentReflection(
+      text: text,
+      createdAt: createdAt,
+      patterns: listOf(raw['patterns']),
+      interpretation: (raw['interpretation'] ?? '').toString(),
+      detectedFindings: listOf(raw['detectedFindings']),
+      rationale: (raw['rationale'] ?? '').toString(),
+      evidenceTerms: listOf(raw['evidenceTerms']),
+      reasoningSummary: (raw['reasoningSummary'] ?? '').toString(),
+      source: (raw['source'] ?? '').toString(),
+      detectedRisk: _riskLevelFromString((raw['detectedRisk'] ?? '').toString()),
+    );
+  }
+
+  RiskLevel _riskLevelFromString(String value) {
+    switch (value.trim().toLowerCase()) {
+      case 'high':
+        return RiskLevel.high;
+      case 'medium':
+        return RiskLevel.medium;
+      default:
+        return RiskLevel.low;
+    }
   }
 
   (String, String)? get _pollingTarget {
@@ -1166,13 +1565,178 @@ class _SchoolMentalHealthFlowState extends State<SchoolMentalHealthFlow> {
   }
 }
 
+class _KaiaMessageCard extends StatefulWidget {
+  final String message;
+
+  const _KaiaMessageCard({required this.message});
+
+  @override
+  State<_KaiaMessageCard> createState() => _KaiaMessageCardState();
+}
+
+class _KaiaMessageCardState extends State<_KaiaMessageCard>
+  with TickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _fade;
+  late final Animation<Offset> _slide;
+  late final AnimationController _breathController;
+  late final Animation<double> _breath;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 520),
+    );
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.06),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+
+    _breathController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat(reverse: true);
+    _breath = Tween<double>(
+      begin: 0.985,
+      end: 1.015,
+    ).animate(
+      CurvedAnimation(parent: _breathController, curve: Curves.easeInOut),
+    );
+
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _breathController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _fade,
+      child: SlideTransition(
+        position: _slide,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF3EEFF),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.purple.shade100),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              SizedBox(
+                height: 150,
+                child: ClipRect(
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    heightFactor: 0.95,
+                    child: ScaleTransition(
+                      scale: _breath,
+                      child: Image.asset(
+                        'assets/logo/kaia_character_clean.png',
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Icon(
+                            Icons.psychology_rounded,
+                            size: 60,
+                            color: Color(0xFF7C3AED),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.78),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'KAIA: ${widget.message}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontFamily: 'SF Pro Text',
+                    color: Color(0xFF4C1D95),
+                    height: 1.4,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Widget de fade-in con delay para animaciones de aparición ──────────────
+class _FadeInCard extends StatefulWidget {
+  final Widget child;
+  final Duration delay;
+  const _FadeInCard({required this.child, required this.delay});
+
+  @override
+  State<_FadeInCard> createState() => _FadeInCardState();
+}
+
+class _FadeInCardState extends State<_FadeInCard>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    Future.delayed(widget.delay, () {
+      if (mounted) _ctrl.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _anim,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.04),
+          end: Offset.zero,
+        ).animate(_anim),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
 class RoleAccessScreen extends StatelessWidget {
   final ValueChanged<AppRole> onRoleSelected;
 
-  const RoleAccessScreen({
-    super.key,
-    required this.onRoleSelected,
-  });
+  const RoleAccessScreen({super.key, required this.onRoleSelected});
 
   @override
   Widget build(BuildContext context) {
@@ -1200,10 +1764,7 @@ class RoleAccessScreen extends StatelessWidget {
                   Text(
                     'Selecciona tu perfil para abrir la experiencia correcta.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.grey[700],
-                      fontSize: 15,
-                    ),
+                    style: TextStyle(color: Colors.grey[700], fontSize: 15),
                   ),
                   const SizedBox(height: 28),
                   ElevatedButton.icon(
@@ -1303,6 +1864,8 @@ class _DailyCheckInScreenState extends State<DailyCheckInScreen> {
     final options = _optionsFor(current.scale);
     final scaleLabel = _labelFor(current.scale);
     final intro = _introFor(current.scale);
+    final kaiaPrompt =
+        'Estoy contigo en esta pregunta del check-in. Elige la opción que más se parezca a cómo te sentiste.';
 
     return SafeArea(
       child: ListView(
@@ -1325,6 +1888,8 @@ class _DailyCheckInScreenState extends State<DailyCheckInScreen> {
               fontFamily: 'SF Pro Text',
             ),
           ),
+          const SizedBox(height: 12),
+          _KaiaMessageCard(message: kaiaPrompt),
           const SizedBox(height: 16),
           LinearProgressIndicator(
             value: progress,
@@ -1608,7 +2173,10 @@ class StudentAiHome extends StatefulWidget {
   final ValueChanged<ReflectionAnalysis> onReflectionSubmitted;
   final ValueChanged<AppointmentStudentResponse> onAppointmentResponse;
   final Future<void> Function(String planId, String taskId, bool completed)
-      onToggleTreatmentTask;
+  onToggleTreatmentTask;
+  final bool isDarkMode;
+  final VoidCallback onToggleThemeMode;
+  final VoidCallback onLogout;
 
   const StudentAiHome({
     super.key,
@@ -1616,16 +2184,26 @@ class StudentAiHome extends StatefulWidget {
     required this.onReflectionSubmitted,
     required this.onAppointmentResponse,
     required this.onToggleTreatmentTask,
+    required this.isDarkMode,
+    required this.onToggleThemeMode,
+    required this.onLogout,
   });
 
   @override
   State<StudentAiHome> createState() => _StudentAiHomeState();
 }
 
-class _StudentAiHomeState extends State<StudentAiHome> {
+class _StudentAiHomeState extends State<StudentAiHome>
+    with TickerProviderStateMixin {
   final TextEditingController _controller = TextEditingController();
   final TextEditingController _backendController = TextEditingController();
   bool _isSending = false;
+  int _tabIndex = 0; // 0=Inicio 1=Progreso 2=Apoyo
+
+  // Glow animation for FAB
+  late AnimationController _glowController;
+  late Animation<double> _glowAnim;
+
   static const String _defaultPublicBackendUrl = String.fromEnvironment(
     'AI_BACKEND_URL',
     defaultValue: 'https://mi-app-ai-backend.onrender.com',
@@ -1645,6 +2223,13 @@ class _StudentAiHomeState extends State<StudentAiHome> {
   void initState() {
     super.initState();
     _loadChatSettings();
+    _glowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _glowAnim = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
+    );
   }
 
   Future<void> _loadChatSettings() async {
@@ -1683,21 +2268,328 @@ class _StudentAiHomeState extends State<StudentAiHome> {
   void dispose() {
     _controller.dispose();
     _backendController.dispose();
+    _glowController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final keyboardVisible = MediaQuery.of(context).viewInsets.bottom > 0;
+    final tabTitles = ['Mi espacio', 'Mi Progreso', 'Apoyo'];
+
+    // Build check-in summaries for the Progreso tab
+    final checkInSummaries = widget.studentCase.checkIns.map((c) {
+      return CheckInSummary(
+        date: c.date,
+        wellbeingScore: c.wellbeingScore.toDouble(),
+        who5Percent: c.who5Percent.toDouble(),
+        phq2Score: c.phq2Score,
+        gad2Score: c.gad2Score,
+        riskLevel: c.riskLevel.name,
+      );
+    }).toList();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F3FF),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          tabTitles[_tabIndex],
+          style: const TextStyle(
+            fontFamily: 'SF Pro Display',
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: Color(0xFF3B1B8F),
+          ),
+        ),
+        actions: [
+          // Emergency button — always visible, red heart
+          Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: IconButton(
+              tooltip: 'Emergencia',
+              onPressed: _showEmergencyModal,
+              icon: Icon(
+                Icons.favorite_rounded,
+                color: Colors.red.shade600,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: widget.isDarkMode ? 'Modo claro' : 'Modo oscuro',
+            onPressed: widget.onToggleThemeMode,
+            icon: Icon(
+              widget.isDarkMode
+                  ? Icons.light_mode_rounded
+                  : Icons.dark_mode_rounded,
+              color: const Color(0xFF3B1B8F),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Cerrar sesión',
+            onPressed: widget.onLogout,
+            icon: const Icon(Icons.logout_rounded, color: Color(0xFF3B1B8F)),
+          ),
+        ],
+      ),
+      body: IndexedStack(
+        index: _tabIndex,
+        children: [
+          _buildHomeTab(),
+          MiProgresoBody(checkIns: checkInSummaries),
+          const ApoyoBody(),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tabIndex,
+        onDestinationSelected: (i) => setState(() => _tabIndex = i),
+        backgroundColor: Colors.white,
+        indicatorColor: const Color(0xFFEDE9FE),
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded, color: Color(0xFF6D28D9)),
+            label: 'Inicio',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.show_chart_outlined),
+            selectedIcon: Icon(Icons.show_chart_rounded, color: Color(0xFF6D28D9)),
+            label: 'Progreso',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.spa_outlined),
+            selectedIcon: Icon(Icons.spa_rounded, color: Color(0xFF6D28D9)),
+            label: 'Apoyo',
+          ),
+        ],
+      ),
+      floatingActionButton:
+          (_tabIndex == 0 && !keyboardVisible) ? _buildGlowFAB() : null,
+    );
+  }
+
+  // ── FAB con animación de glow ──────────────────────────────────────────────
+  Widget _buildGlowFAB() {
+    return AnimatedBuilder(
+      animation: _glowAnim,
+      builder: (_, child) {
+        return Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF7C3AED).withOpacity(_glowAnim.value * 0.7),
+                blurRadius: 20 + (_glowAnim.value * 12),
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: child,
+        );
+      },
+      child: FloatingActionButton(
+        onPressed: _openChatSettings,
+        backgroundColor: const Color(0xFF7C3AED),
+        foregroundColor: Colors.white,
+        tooltip: 'Ajustes IA',
+        child: const Icon(Icons.insights_rounded),
+      ),
+    );
+  }
+
+  // ── Modal emergencia ───────────────────────────────────────────────────────
+  void _showEmergencyModal() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Icon(Icons.favorite_rounded, color: Colors.red.shade600, size: 28),
+                const SizedBox(width: 10),
+                const Text(
+                  '¿Necesitas apoyo ahora?',
+                  style: TextStyle(
+                    fontFamily: 'SF Pro Display',
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1E1B4B),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'No estás solo/a. Hay personas disponibles para escucharte en este momento.',
+              style: TextStyle(
+                fontFamily: 'SF Pro Text',
+                fontSize: 14,
+                color: Color(0xFF6B7280),
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 20),
+            _emergencyTile(
+              icon: Icons.person_outlined,
+              color: const Color(0xFF7C3AED),
+              title: 'Tu psicóloga escolar',
+              subtitle: 'Agenda una cita desde la pantalla de inicio',
+            ),
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade100,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.phone_rounded, color: Colors.red.shade700),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Línea de la Vida',
+                          style: TextStyle(
+                            fontFamily: 'SF Pro Display',
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                            color: Colors.red.shade800,
+                          ),
+                        ),
+                        Text(
+                          '800-911-2000',
+                          style: TextStyle(
+                            fontFamily: 'SF Pro Display',
+                            fontWeight: FontWeight.w800,
+                            fontSize: 22,
+                            color: Colors.red.shade700,
+                          ),
+                        ),
+                        Text(
+                          '24 h · Gratuito · Confidencial',
+                          style: TextStyle(
+                            fontFamily: 'SF Pro Text',
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _emergencyTile({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.purple.shade100),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontFamily: 'SF Pro Display',
+                    fontWeight: FontWeight.w700,
+                    color: color,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontFamily: 'SF Pro Text',
+                    fontSize: 12,
+                    color: Color(0xFF6B7280),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Pestaña Inicio (Home) ──────────────────────────────────────────────────
+  Widget _buildHomeTab() {
     final latest = widget.studentCase.latestCheckIn;
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-    final pendingAppointments = widget.studentCase.appointments
-        .where((appointment) => appointment.status == AppointmentStatus.pending)
-        .toList()
-      ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
-    final confirmedAppointments = widget.studentCase.appointments
-        .where((appointment) => appointment.status == AppointmentStatus.confirmed)
-        .toList()
-      ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
+    final pendingAppointments =
+        widget.studentCase.appointments
+            .where(
+              (appointment) => appointment.status == AppointmentStatus.pending,
+            )
+            .toList()
+          ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
+    final confirmedAppointments =
+        widget.studentCase.appointments
+            .where(
+              (appointment) =>
+                  appointment.status == AppointmentStatus.confirmed,
+            )
+            .toList()
+          ..sort((a, b) => a.scheduledFor.compareTo(b.scheduledFor));
     final treatmentPlans = widget.studentCase.treatmentPlans;
     final usingPublicBackend = _effectiveBackendUrl != _backendUrl;
 
@@ -1708,303 +2600,89 @@ class _StudentAiHomeState extends State<StudentAiHome> {
           Positioned.fill(
             child: ListView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: EdgeInsets.fromLTRB(16, 16, 16, 120 + keyboardInset),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 132),
               children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF0F172A), Color(0xFF1D4ED8)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
+                // ── Hero card mejorada ────────────────────────────────────
+                _buildHeroCard(latest),
+                const SizedBox(height: 12),
+                // ── Estado de hoy ─────────────────────────────────────────
+                if (latest != null) ...[
+                  _buildEstadoDeHoyCard(latest),
+                  const SizedBox(height: 12),
+                ],
+                // ── Citas con fade-in ─────────────────────────────────────
+                _FadeInCard(
+                  delay: const Duration(milliseconds: 100),
+                  child: _studentSection(
+                    title: 'Citas',
+                    icon: Icons.event_available_outlined,
+                    child: _buildAppointmentsContent(
+                      pendingAppointments,
+                      confirmedAppointments,
                     ),
-                    borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Mi espacio',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'SF Pro Display',
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
+                ),
+                const SizedBox(height: 12),
+                // ── Tratamiento con fade-in ───────────────────────────────
+                _FadeInCard(
+                  delay: const Duration(milliseconds: 200),
+                  child: _studentSection(
+                    title: 'Tratamiento',
+                    icon: Icons.favorite_outline,
+                    child: _buildTreatmentContent(treatmentPlans),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // ── Registro personal ─────────────────────────────────────
+                _FadeInCard(
+                  delay: const Duration(milliseconds: 300),
+                  child: _studentSection(
+                    title: 'Registro personal',
+                    icon: Icons.edit_note_outlined,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const _KaiaMessageCard(
+                          message:
+                              'Te escucho. Cuéntame cómo te fue hoy y lo guardo en tu registro.',
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        latest == null
-                            ? 'Todavia no registras tu check-in de hoy.'
-                            : 'Tu check-in de hoy ya quedo registrado. Seguimos acompanando tu proceso paso a paso.',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontFamily: 'SF Pro Text',
+                        const SizedBox(height: 10),
+                        Text(
+                          latest == null
+                              ? 'Cuando quieras, puedes dejar un comentario breve sobre como te fue hoy.'
+                              : latest.summary,
+                          style: TextStyle(color: Colors.grey[800]),
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _infoChip(
-                            icon: Icons.calendar_today_outlined,
-                            label: confirmedAppointments.isEmpty
-                                ? 'Sin citas confirmadas'
-                                : '${confirmedAppointments.length} cita(s) confirmada(s)',
-                          ),
-                          _infoChip(
-                            icon: Icons.task_alt_outlined,
-                            label: treatmentPlans.isEmpty
-                                ? 'Sin tareas asignadas'
-                                : '${treatmentPlans.expand((plan) => plan.tasks).where((task) => task.completed).length}/${treatmentPlans.expand((plan) => plan.tasks).length} tareas listas',
+                        if (usingPublicBackend) ...[
+                          const SizedBox(height: 10),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8F0FF),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.purple.shade100,
+                              ),
+                            ),
+                            child: Text(
+                              'Se uso el backend publico para mantener la conexion activa.',
+                              style: TextStyle(
+                                color: Colors.purple[900],
+                                fontFamily: 'SF Pro Text',
+                                fontSize: 12,
+                              ),
+                            ),
                           ),
                         ],
-                      ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: TextButton.icon(
-                          onPressed: _openChatSettings,
-                          icon: const Icon(Icons.tune, color: Colors.white),
-                          label: const Text(
-                            'Ajustes de conexion',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _studentSection(
-                  title: 'Citas',
-                  icon: Icons.event_available_outlined,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (pendingAppointments.isEmpty && confirmedAppointments.isEmpty)
-                        Text(
-                          'No tienes citas registradas por ahora.',
-                          style: TextStyle(color: Colors.grey[700]),
-                        ),
-                      if (pendingAppointments.isNotEmpty) ...[
-                        Text(
-                          'Pendientes de confirmar',
-                          style: TextStyle(
-                            color: Colors.orange[800],
-                            fontFamily: 'SF Pro Display',
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        ...pendingAppointments.map((appointment) {
-                          final startsAt = _formatDateTime(appointment.scheduledFor);
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFFFF8E8),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFFF5D494)),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  startsAt,
-                                  style: const TextStyle(
-                                    fontFamily: 'SF Pro Text',
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(appointment.reason),
-                                const SizedBox(height: 10),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton(
-                                        onPressed: () {
-                                          widget.onAppointmentResponse(
-                                            AppointmentStudentResponse(
-                                              appointmentId: appointment.id,
-                                              status: AppointmentStatus.declined,
-                                            ),
-                                          );
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(
-                                              content: Text('Avisaste que no puedes asistir en ese horario.'),
-                                            ),
-                                          );
-                                        },
-                                        child: const Text('No puedo'),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: ElevatedButton(
-                                        onPressed: () {
-                                          widget.onAppointmentResponse(
-                                            AppointmentStudentResponse(
-                                              appointmentId: appointment.id,
-                                              status: AppointmentStatus.confirmed,
-                                            ),
-                                          );
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            const SnackBar(
-                                              content: Text('Confirmaste tu disponibilidad para la cita.'),
-                                            ),
-                                          );
-                                        },
-                                        child: const Text('Confirmar'),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                        const SizedBox(height: 8),
                       ],
-                      if (confirmedAppointments.isNotEmpty) ...[
-                        Text(
-                          'Proximas',
-                          style: TextStyle(
-                            color: Colors.green[800],
-                            fontFamily: 'SF Pro Display',
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        ...confirmedAppointments.take(3).map((appointment) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Icon(
-                                  Icons.check_circle_rounded,
-                                  size: 18,
-                                  color: Colors.green.shade700,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    '${_formatDateTime(appointment.scheduledFor)} · ${appointment.reason}',
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _studentSection(
-                  title: 'Tratamiento',
-                  icon: Icons.favorite_outline,
-                  child: treatmentPlans.isEmpty
-                      ? Text(
-                          'Tu profesional aun no te ha compartido tareas o seguimiento.',
-                          style: TextStyle(color: Colors.grey[700]),
-                        )
-                      : Column(
-                          children: treatmentPlans.map((plan) {
-                            return Container(
-                              width: double.infinity,
-                              margin: const EdgeInsets.only(bottom: 12),
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: Colors.blue.shade100),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    plan.title,
-                                    style: const TextStyle(
-                                      fontFamily: 'SF Pro Display',
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                  if (plan.summary.isNotEmpty) ...[
-                                    const SizedBox(height: 6),
-                                    Text(plan.summary),
-                                  ],
-                                  const SizedBox(height: 10),
-                                  ...plan.tasks.map((task) {
-                                    return CheckboxListTile(
-                                      contentPadding: EdgeInsets.zero,
-                                      value: task.completed,
-                                      title: Text(task.title),
-                                      subtitle: task.completedAt == null
-                                          ? null
-                                          : Text(
-                                              'Marcada el ${_formatDateTime(task.completedAt!)}',
-                                            ),
-                                      onChanged: (value) {
-                                        widget.onToggleTreatmentTask(
-                                          plan.id,
-                                          task.id,
-                                          value ?? false,
-                                        );
-                                      },
-                                      controlAffinity:
-                                          ListTileControlAffinity.leading,
-                                    );
-                                  }),
-                                ],
-                              ),
-                            );
-                          }).toList(),
-                        ),
-                ),
-                const SizedBox(height: 12),
-                _studentSection(
-                  title: 'Registro personal',
-                  icon: Icons.edit_note_outlined,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        latest == null
-                            ? 'Cuando quieras, puedes dejar un comentario breve sobre como te fue hoy.'
-                            : latest.summary,
-                        style: TextStyle(color: Colors.grey[800]),
-                      ),
-                      if (usingPublicBackend) ...[
-                        const SizedBox(height: 10),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF8F0FF),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.purple.shade100),
-                          ),
-                          child: Text(
-                            'Se uso el backend publico para mantener la conexion activa.',
-                            style: TextStyle(
-                              color: Colors.purple[900],
-                              fontFamily: 'SF Pro Text',
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
+                    ),
                   ),
                 ),
               ],
             ),
           ),
+          // ── Chat input bar ─────────────────────────────────────────────
           Align(
             alignment: Alignment.bottomCenter,
             child: SafeArea(
@@ -2051,6 +2729,448 @@ class _StudentAiHomeState extends State<StudentAiHome> {
     );
   }
 
+  // ── Hero card con gradiente morado vibrante ────────────────────────────────
+  Widget _buildHeroCard(DailyCheckIn? latest) {
+    final now = DateTime.now();
+    final greeting = now.hour < 12
+        ? 'Buenos días'
+        : now.hour < 18
+        ? 'Buenas tardes'
+        : 'Buenas noches';
+    final name = widget.studentCase.studentName;
+    final risk = widget.studentCase.riskLevel;
+    final (badgeColor, riskLabel) = switch (risk) {
+      RiskLevel.high   => (Colors.red, 'Riesgo alto'),
+      RiskLevel.medium => (Colors.orange, 'Riesgo medio'),
+      _                => (Colors.green, 'Sin riesgo'),
+    };
+
+    final confirmedCount = widget.studentCase.appointments
+        .where((a) => a.status == AppointmentStatus.confirmed)
+        .length;
+    final tasksTotal = widget.studentCase.treatmentPlans
+        .expand((p) => p.tasks)
+        .length;
+    final tasksCompleted = widget.studentCase.treatmentPlans
+        .expand((p) => p.tasks)
+        .where((t) => t.completed)
+        .length;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF3B1B8F), Color(0xFF7C3AED), Color(0xFF2563EB)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF7C3AED).withOpacity(0.35),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Saludo + badge riesgo
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$greeting,',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontFamily: 'SF Pro Text',
+                        fontSize: 15,
+                      ),
+                    ),
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontFamily: 'SF Pro Display',
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: badgeColor.withOpacity(0.25),
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: badgeColor.withOpacity(0.6)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, size: 8, color: badgeColor),
+                    const SizedBox(width: 5),
+                    Text(
+                      riskLabel,
+                      style: TextStyle(
+                        color: badgeColor,
+                        fontFamily: 'SF Pro Text',
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            latest == null
+                ? 'Todavía no registras tu check-in de hoy.'
+                : 'Tu check-in de hoy ya quedó registrado. Seguimos acompañando tu proceso.',
+            style: const TextStyle(
+              color: Colors.white,
+              fontFamily: 'SF Pro Text',
+              fontSize: 14,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _infoChip(
+                icon: Icons.calendar_today_outlined,
+                label: confirmedCount == 0
+                    ? 'Sin citas confirmadas'
+                    : '$confirmedCount cita(s) confirmada(s)',
+              ),
+              _infoChip(
+                icon: Icons.task_alt_outlined,
+                label: tasksTotal == 0
+                    ? 'Sin tareas asignadas'
+                    : '$tasksCompleted/$tasksTotal tareas listas',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Estado de hoy con barras de progreso ───────────────────────────────────
+  Widget _buildEstadoDeHoyCard(DailyCheckIn c) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.purple.shade100),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.purple.withOpacity(0.07),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.mood_rounded, color: Colors.purple.shade600),
+              const SizedBox(width: 8),
+              const Text(
+                'Estado de hoy',
+                style: TextStyle(
+                  fontFamily: 'SF Pro Display',
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF3B1B8F),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _scoreBar(
+            label: 'WHO-5',
+            value: c.who5Percent / 100,
+            color: const Color(0xFF10B981),
+            display: '${c.who5Percent.toStringAsFixed(0)}%',
+          ),
+          const SizedBox(height: 8),
+          _scoreBar(
+            label: 'PHQ-2',
+            value: (6 - c.phq2Score.clamp(0, 6)) / 6,
+            color: const Color(0xFFF59E0B),
+            display: '${c.phq2Score}/6',
+            invertLabel: true,
+          ),
+          const SizedBox(height: 8),
+          _scoreBar(
+            label: 'GAD-2',
+            value: (6 - c.gad2Score.clamp(0, 6)) / 6,
+            color: const Color(0xFF3B82F6),
+            display: '${c.gad2Score}/6',
+            invertLabel: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _scoreBar({
+    required String label,
+    required double value,
+    required Color color,
+    required String display,
+    bool invertLabel = false,
+  }) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 52,
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontFamily: 'SF Pro Text',
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF374151),
+            ),
+          ),
+        ),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              value: value.clamp(0.0, 1.0),
+              backgroundColor: color.withOpacity(0.12),
+              color: color,
+              minHeight: 10,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          display,
+          style: TextStyle(
+            fontFamily: 'SF Pro Text',
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: color,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Citas ──────────────────────────────────────────────────────────────────
+  Widget _buildAppointmentsContent(
+    List<ProfessionalAppointment> pending,
+    List<ProfessionalAppointment> confirmed,
+  ) {
+    if (pending.isEmpty && confirmed.isEmpty) {
+      return Text(
+        'No tienes citas registradas por ahora.',
+        style: TextStyle(color: Colors.grey[700]),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (pending.isNotEmpty) ...[
+          Text(
+            'Pendientes de confirmar',
+            style: TextStyle(
+              color: Colors.orange[800],
+              fontFamily: 'SF Pro Display',
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...pending.map((appointment) {
+            final startsAt = _formatDateTime(appointment.scheduledFor);
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFF8E8),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFF5D494)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    startsAt,
+                    style: const TextStyle(
+                      fontFamily: 'SF Pro Text',
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(appointment.reason),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {
+                            widget.onAppointmentResponse(
+                              AppointmentStudentResponse(
+                                appointmentId: appointment.id,
+                                status: AppointmentStatus.declined,
+                              ),
+                            );
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Avisaste que no puedes asistir en ese horario.',
+                                ),
+                              ),
+                            );
+                          },
+                          child: const Text('No puedo'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            widget.onAppointmentResponse(
+                              AppointmentStudentResponse(
+                                appointmentId: appointment.id,
+                                status: AppointmentStatus.confirmed,
+                              ),
+                            );
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Confirmaste tu disponibilidad para la cita.',
+                                ),
+                              ),
+                            );
+                          },
+                          child: const Text('Confirmar'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }),
+          const SizedBox(height: 8),
+        ],
+        if (confirmed.isNotEmpty) ...[
+          Text(
+            'Próximas',
+            style: TextStyle(
+              color: Colors.green[800],
+              fontFamily: 'SF Pro Display',
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...confirmed.take(3).map((appointment) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.check_circle_rounded,
+                    size: 18,
+                    color: Colors.green.shade700,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${_formatDateTime(appointment.scheduledFor)} · ${appointment.reason}',
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ],
+    );
+  }
+
+  // ── Tratamiento ────────────────────────────────────────────────────────────
+  Widget _buildTreatmentContent(List<TreatmentPlan> treatmentPlans) {
+    if (treatmentPlans.isEmpty) {
+      return Text(
+        'Tu profesional aún no te ha compartido tareas o seguimiento.',
+        style: TextStyle(color: Colors.grey[700]),
+      );
+    }
+    return Column(
+      children: treatmentPlans.map((plan) {
+        return Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.blue.shade100),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                plan.title,
+                style: const TextStyle(
+                  fontFamily: 'SF Pro Display',
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              if (plan.summary.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(plan.summary),
+              ],
+              const SizedBox(height: 10),
+              ...plan.tasks.map((task) {
+                return CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: task.completed,
+                  title: Text(task.title),
+                  subtitle: task.completedAt == null
+                      ? null
+                      : Text(
+                          'Marcada el ${_formatDateTime(task.completedAt!)}',
+                        ),
+                  onChanged: (value) {
+                    widget.onToggleTreatmentTask(
+                      plan.id,
+                      task.id,
+                      value ?? false,
+                    );
+                  },
+                  controlAffinity: ListTileControlAffinity.leading,
+                );
+              }),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   String _formatDateTime(DateTime date) {
     final day = date.day.toString().padLeft(2, '0');
     final month = date.month.toString().padLeft(2, '0');
@@ -2082,15 +3202,15 @@ class _StudentAiHomeState extends State<StudentAiHome> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Gracias por tu confianza y por tomarte este tiempo. Tu mensaje quedo guardado.',
+            'KAIA: Gracias por tu confianza y por tomarte este tiempo. Tu mensaje quedó guardado.',
           ),
         ),
       );
     } on AiAnalysisException catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2118,7 +3238,9 @@ class _StudentAiHomeState extends State<StudentAiHome> {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Theme.of(context).dividerColor.withOpacity(0.16)),
+        border: Border.all(
+          color: Theme.of(context).dividerColor.withOpacity(0.16),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2356,19 +3478,16 @@ class AppointmentScheduleResult {
   final bool ok;
   final String message;
 
-  const AppointmentScheduleResult({
-    required this.ok,
-    required this.message,
-  });
+  const AppointmentScheduleResult({required this.ok, required this.message});
 }
 
 class ProfessionalDashboard extends StatefulWidget {
   final List<StudentCase> students;
   final Future<AppointmentScheduleResult> Function(AppointmentRequest request)
-      onScheduleAppointment;
+  onScheduleAppointment;
   final List<ProfessionalAgendaNotification> notifications;
   final Future<void> Function(TreatmentPlan plan, String studentName)
-      onAssignTreatmentPlan;
+  onAssignTreatmentPlan;
 
   const ProfessionalDashboard({
     super.key,
@@ -2386,6 +3505,9 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
   static const int _agendaStartHour = 8;
   static const int _agendaEndHour = 18;
   static const int _slotStepMinutes = 15;
+  static const Color _medicalBlue = Color(0xFF0B4A6F);
+  static const Color _medicalTeal = Color(0xFF0A7B83);
+  static const Color _medicalMint = Color(0xFFE8F7F6);
 
   String? _selectedStudentName;
   final TextEditingController _reasonController = TextEditingController(
@@ -2394,24 +3516,60 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
   final TextEditingController _treatmentTitleController = TextEditingController(
     text: 'Plan semanal de autocuidado',
   );
-  final TextEditingController _treatmentSummaryController = TextEditingController(
-    text: 'Pequenas acciones diarias para sostener rutina, descanso y regulacion emocional.',
+  final TextEditingController
+  _treatmentSummaryController = TextEditingController(
+    text:
+        'Pequenas acciones diarias para sostener rutina, descanso y regulacion emocional.',
   );
   final TextEditingController _treatmentTasksController = TextEditingController(
-    text: 'Dormir antes de las 11 pm\nCaminar 15 minutos\nRegistrar una emocion del dia',
+    text:
+        'Dormir antes de las 11 pm\nCaminar 15 minutos\nRegistrar una emocion del dia',
   );
   DateTime _selectedDateTime = DateTime.now().add(const Duration(days: 1));
   int _selectedDurationMinutes = 45;
   bool _scheduling = false;
   bool _isUsingAutoSlot = true;
   AppointmentStatus? _agendaStatusFilter;
+    final Map<String, _ProfessionalRecord> _recordsByStudent =
+      <String, _ProfessionalRecord>{};
+    final TextEditingController _contactPhoneController = TextEditingController();
+    final TextEditingController _contactEmailController = TextEditingController();
+    final TextEditingController _contactGuardianController =
+      TextEditingController();
+    final TextEditingController _contactEmergencyController =
+      TextEditingController();
+    final TextEditingController _contactMetaController = TextEditingController();
+    final TextEditingController _clinicalContextController =
+      TextEditingController();
+    final TextEditingController _professionalNoteController =
+      TextEditingController();
+    final TextEditingController _bitacoraController = TextEditingController();
+    String _bitacoraType = 'Seguimiento';
+    int? _editingNoteIndex;
+    int? _editingBitacoraIndex;
+    String? _recordControllersForStudent;
+
+  static const List<int> _heatmapHours = <int>[
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+  ];
 
   @override
   void initState() {
     super.initState();
+    _seedProfessionalRecords();
     if (widget.students.isNotEmpty) {
       _selectedStudentName = widget.students.first.studentName;
     }
+    _syncRecordControllersForSelectedStudent(force: true);
     _applySuggestedSlot();
   }
 
@@ -2421,7 +3579,8 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
     final names = widget.students.map((s) => s.studentName).toSet();
     if (_selectedStudentName == null && widget.students.isNotEmpty) {
       _selectedStudentName = widget.students.first.studentName;
-    } else if (_selectedStudentName != null && !names.contains(_selectedStudentName)) {
+    } else if (_selectedStudentName != null &&
+        !names.contains(_selectedStudentName)) {
       _selectedStudentName = widget.students.isEmpty
           ? null
           : widget.students.first.studentName;
@@ -2430,6 +3589,8 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
     if (_isUsingAutoSlot) {
       _applySuggestedSlot();
     }
+    _seedProfessionalRecords();
+    _syncRecordControllersForSelectedStudent(force: true);
   }
 
   @override
@@ -2438,7 +3599,231 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
     _treatmentTitleController.dispose();
     _treatmentSummaryController.dispose();
     _treatmentTasksController.dispose();
+    _contactPhoneController.dispose();
+    _contactEmailController.dispose();
+    _contactGuardianController.dispose();
+    _contactEmergencyController.dispose();
+    _contactMetaController.dispose();
+    _clinicalContextController.dispose();
+    _professionalNoteController.dispose();
+    _bitacoraController.dispose();
     super.dispose();
+  }
+
+  void _seedProfessionalRecords() {
+    for (final student in widget.students) {
+      _recordsByStudent.putIfAbsent(
+        student.studentName,
+        () => _ProfessionalRecord(
+          contact: _PatientContactInfo(
+            phone: 'Sin registrar',
+            email:
+                '${student.studentName.toLowerCase().replaceAll(' ', '.')}@colegio.edu',
+            guardianName: 'Tutor de ${student.studentName}',
+            emergencyContact: '911 / Enfermeria escolar',
+            relevantMeta: 'Grupo escolar sin registrar',
+          ),
+          clinicalContext:
+              'Contexto inicial: seguimiento preventivo de salud mental escolar.',
+          notes: const <_ProfessionalNote>[],
+          bitacora: const <_BitacoraEntry>[],
+        ),
+      );
+    }
+  }
+
+  void _syncRecordControllersForSelectedStudent({bool force = false}) {
+    final studentName = _selectedStudentName;
+    if (studentName == null) return;
+    if (!force && _recordControllersForStudent == studentName) return;
+
+    final record = _recordsByStudent[studentName];
+    if (record == null) return;
+
+    _contactPhoneController.text = record.contact.phone;
+    _contactEmailController.text = record.contact.email;
+    _contactGuardianController.text = record.contact.guardianName;
+    _contactEmergencyController.text = record.contact.emergencyContact;
+    _contactMetaController.text = record.contact.relevantMeta;
+    _clinicalContextController.text = record.clinicalContext;
+    _professionalNoteController.clear();
+    _bitacoraController.clear();
+    _editingNoteIndex = null;
+    _editingBitacoraIndex = null;
+    _recordControllersForStudent = studentName;
+  }
+
+  void _selectStudent(String studentName) {
+    setState(() {
+      _selectedStudentName = studentName;
+    });
+    _syncRecordControllersForSelectedStudent(force: true);
+  }
+
+  _ProfessionalRecord? get _selectedProfessionalRecord {
+    final student = _selectedStudentName;
+    if (student == null) return null;
+    return _recordsByStudent[student];
+  }
+
+  void _saveContactAndContext() {
+    final student = _selectedStudentName;
+    if (student == null) return;
+    final record = _recordsByStudent[student];
+    if (record == null) return;
+
+    final updated = record.copyWith(
+      contact: record.contact.copyWith(
+        phone: _contactPhoneController.text.trim(),
+        email: _contactEmailController.text.trim(),
+        guardianName: _contactGuardianController.text.trim(),
+        emergencyContact: _contactEmergencyController.text.trim(),
+        relevantMeta: _contactMetaController.text.trim(),
+      ),
+      clinicalContext: _clinicalContextController.text.trim(),
+      bitacora: [
+        _BitacoraEntry(
+          id: 'log-${DateTime.now().microsecondsSinceEpoch}',
+          type: 'Actualizacion',
+          text: 'Se actualizaron datos de contacto y contexto clinico.',
+          createdAt: DateTime.now(),
+        ),
+        ...record.bitacora,
+      ],
+    );
+
+    setState(() {
+      _recordsByStudent[student] = updated;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Expediente actualizado.')),
+    );
+  }
+
+  void _saveProfessionalNote() {
+    final student = _selectedStudentName;
+    if (student == null) return;
+    final record = _recordsByStudent[student];
+    if (record == null) return;
+
+    final text = _professionalNoteController.text.trim();
+    if (text.isEmpty) return;
+
+    final notes = [...record.notes];
+    if (_editingNoteIndex != null &&
+        _editingNoteIndex! >= 0 &&
+        _editingNoteIndex! < notes.length) {
+      final existing = notes[_editingNoteIndex!];
+      notes[_editingNoteIndex!] = existing.copyWith(
+        text: text,
+        updatedAt: DateTime.now(),
+      );
+    } else {
+      notes.insert(
+        0,
+        _ProfessionalNote(
+          id: 'note-${DateTime.now().microsecondsSinceEpoch}',
+          text: text,
+          author: 'Profesional KAIA',
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+
+    setState(() {
+      _recordsByStudent[student] = record.copyWith(notes: notes);
+      _professionalNoteController.clear();
+      _editingNoteIndex = null;
+    });
+  }
+
+  void _beginEditNote(int index, String text) {
+    setState(() {
+      _editingNoteIndex = index;
+      _professionalNoteController.text = text;
+    });
+  }
+
+  void _deleteNote(int index) {
+    final student = _selectedStudentName;
+    if (student == null) return;
+    final record = _recordsByStudent[student];
+    if (record == null) return;
+    final notes = [...record.notes];
+    if (index < 0 || index >= notes.length) return;
+    notes.removeAt(index);
+    setState(() {
+      _recordsByStudent[student] = record.copyWith(notes: notes);
+      if (_editingNoteIndex == index) {
+        _editingNoteIndex = null;
+        _professionalNoteController.clear();
+      }
+    });
+  }
+
+  void _saveBitacoraEntry() {
+    final student = _selectedStudentName;
+    if (student == null) return;
+    final record = _recordsByStudent[student];
+    if (record == null) return;
+
+    final text = _bitacoraController.text.trim();
+    if (text.isEmpty) return;
+
+    final entries = [...record.bitacora];
+    if (_editingBitacoraIndex != null &&
+        _editingBitacoraIndex! >= 0 &&
+        _editingBitacoraIndex! < entries.length) {
+      final existing = entries[_editingBitacoraIndex!];
+      entries[_editingBitacoraIndex!] = existing.copyWith(
+        type: _bitacoraType,
+        text: text,
+        createdAt: DateTime.now(),
+      );
+    } else {
+      entries.insert(
+        0,
+        _BitacoraEntry(
+          id: 'log-${DateTime.now().microsecondsSinceEpoch}',
+          type: _bitacoraType,
+          text: text,
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+
+    final updated = record.copyWith(bitacora: entries);
+
+    setState(() {
+      _recordsByStudent[student] = updated;
+      _bitacoraController.clear();
+      _editingBitacoraIndex = null;
+    });
+  }
+
+  void _beginEditBitacora(int index, _BitacoraEntry entry) {
+    setState(() {
+      _editingBitacoraIndex = index;
+      _bitacoraType = entry.type;
+      _bitacoraController.text = entry.text;
+    });
+  }
+
+  void _deleteBitacoraEntry(int index) {
+    final student = _selectedStudentName;
+    if (student == null) return;
+    final record = _recordsByStudent[student];
+    if (record == null) return;
+    final entries = [...record.bitacora];
+    if (index < 0 || index >= entries.length) return;
+    entries.removeAt(index);
+    setState(() {
+      _recordsByStudent[student] = record.copyWith(bitacora: entries);
+      if (_editingBitacoraIndex == index) {
+        _editingBitacoraIndex = null;
+        _bitacoraController.clear();
+      }
+    });
   }
 
   StudentCase? get _selectedStudent {
@@ -2459,7 +3844,8 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
       }
     }
     items.sort(
-      (a, b) => a.appointment.scheduledFor.compareTo(b.appointment.scheduledFor),
+      (a, b) =>
+          a.appointment.scheduledFor.compareTo(b.appointment.scheduledFor),
     );
     return items;
   }
@@ -2532,7 +3918,9 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
       final dayEnd = DateTime(day.year, day.month, day.day, _agendaEndHour);
 
       while (slot.add(Duration(minutes: durationMinutes)).isBefore(dayEnd) ||
-          slot.add(Duration(minutes: durationMinutes)).isAtSameMomentAs(dayEnd)) {
+          slot
+              .add(Duration(minutes: durationMinutes))
+              .isAtSameMomentAs(dayEnd)) {
         if (!_hasOverlap(slot, durationMinutes)) {
           return slot;
         }
@@ -2540,15 +3928,13 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
       }
     }
 
-    return _roundUpToStep(
-      from.add(const Duration(days: 1)),
-      _slotStepMinutes,
-    );
+    return _roundUpToStep(from.add(const Duration(days: 1)), _slotStepMinutes);
   }
 
   DateTime _roundUpToStep(DateTime dateTime, int stepMinutes) {
     final remainder = dateTime.minute % stepMinutes;
-    final needsRound = remainder != 0 || dateTime.second != 0 || dateTime.millisecond != 0;
+    final needsRound =
+        remainder != 0 || dateTime.second != 0 || dateTime.millisecond != 0;
     if (!needsRound) {
       return DateTime(
         dateTime.year,
@@ -2575,7 +3961,8 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
     for (final item in _agendaItems) {
       final start = item.appointment.scheduledFor;
       final end = item.appointment.endAt;
-      final overlaps = candidateStart.isBefore(end) && candidateEnd.isAfter(start);
+      final overlaps =
+          candidateStart.isBefore(end) && candidateEnd.isAfter(start);
       if (overlaps) return true;
     }
     return false;
@@ -2611,9 +3998,9 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
     );
     if (!mounted) return;
     setState(() => _scheduling = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(result.message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(result.message)));
   }
 
   Future<void> _saveTreatmentPlan() async {
@@ -2662,9 +4049,10 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
   @override
   Widget build(BuildContext context) {
     final selectedStudent = _selectedStudent;
-    final alerts = selectedStudent?.alerts.reversed.take(5).toList() ??
+    final selectedRecord = _selectedProfessionalRecord;
+    final alerts =
+        selectedStudent?.alerts.reversed.take(5).toList() ??
         const <ProfessionalAlert>[];
-    final treatmentPlans = selectedStudent?.treatmentPlans ?? const <TreatmentPlan>[];
     final highRisk = widget.students
         .where((s) => s.riskLevel == RiskLevel.high)
         .length;
@@ -2678,6 +4066,25 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
           date.month == today.month &&
           date.day == today.day;
     }).length;
+    final pendingCount = _agendaItems
+        .where((item) => item.appointment.status == AppointmentStatus.pending)
+        .length;
+    final confirmedCount = _agendaItems
+        .where((item) => item.appointment.status == AppointmentStatus.confirmed)
+        .length;
+    final declinedCount = _agendaItems
+        .where((item) => item.appointment.status == AppointmentStatus.declined)
+        .length;
+    final withCheckIn = widget.students
+        .where((student) => student.latestCheckIn != null)
+        .toList();
+    final avgWellbeing = withCheckIn.isEmpty
+        ? 0
+        : (withCheckIn
+                      .map((student) => student.latestCheckIn!.wellbeingScore)
+                      .reduce((a, b) => a + b) /
+                  withCheckIn.length)
+              .round();
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -2693,6 +4100,7 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
               value: '${widget.students.length}',
               subtitle: 'Casos en seguimiento',
               icon: Icons.groups_2_outlined,
+              accent: _medicalBlue,
             ),
             _kpiTile(
               title: 'Riesgo Alto',
@@ -2702,27 +4110,60 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
               accent: const Color(0xFFB42318),
             ),
             _kpiTile(
-              title: 'Riesgo Medio',
-              value: '$mediumRisk',
-              subtitle: 'Monitoreo cercano',
-              icon: Icons.monitor_heart_outlined,
-              accent: const Color(0xFFB54708),
+              title: 'Indice de Bienestar',
+              value: '$avgWellbeing',
+              subtitle: 'Promedio WHO-5 / escalas',
+              icon: Icons.health_and_safety_outlined,
+              accent: _medicalTeal,
             ),
             _kpiTile(
               title: 'Citas Hoy',
               value: '$appointmentsToday',
               subtitle: 'Agenda del dia',
               icon: Icons.today_outlined,
+              accent: const Color(0xFF155EEF),
             ),
           ],
         );
 
-        final headerCard = _surfaceCard(
-          title: 'Panel Clinico Profesional',
-          subtitle:
-              'Vista operativa para triage, seguimiento y programacion de citas sin empalmes.',
-          icon: Icons.grid_view_rounded,
+        final headerCard = _medicalHeroCard(
+          avgWellbeing: avgWellbeing,
+          highRisk: highRisk,
+          mediumRisk: mediumRisk,
+          pendingCount: pendingCount,
+          confirmedCount: confirmedCount,
+          declinedCount: declinedCount,
           child: kpiRow,
+        );
+
+        final loadState = _clinicalLoadState(
+          highRisk: highRisk,
+          pendingCount: pendingCount,
+          appointmentsToday: appointmentsToday,
+          avgWellbeing: avgWellbeing,
+        );
+        final heatmapData = _agendaHeatmapData();
+        final criticalStudents = _criticalRanking();
+
+        final loadPanel = _surfaceCard(
+          title: 'Semaforo de Carga Clinica',
+          subtitle: 'Capacidad operativa y presion asistencial del turno.',
+          icon: Icons.traffic_rounded,
+          child: _buildLoadCard(loadState),
+        );
+
+        final heatmapPanel = _surfaceCard(
+          title: 'Heatmap de Agenda',
+          subtitle: 'Concentracion de citas por hora (proximos 7 dias).',
+          icon: Icons.grid_on_rounded,
+          child: _buildAgendaHeatmap(heatmapData),
+        );
+
+        final rankingPanel = _surfaceCard(
+          title: 'Ranking de Casos Criticos',
+          subtitle: 'Prioridad sugerida por riesgo, sintomas y alertas.',
+          icon: Icons.leaderboard_rounded,
+          child: _buildCriticalRanking(criticalStudents),
         );
 
         final patientPanel = _surfaceCard(
@@ -2733,49 +4174,107 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
             children: widget.students.map((student) {
               final latest = student.latestCheckIn;
               final selected = student.studentName == _selectedStudentName;
-              final score = latest == null ? '--' : '${latest.wellbeingScore}/100';
+              final score = latest == null
+                  ? '--'
+                  : '${latest.wellbeingScore}/100';
 
               return Container(
                 margin: const EdgeInsets.only(bottom: 10),
                 decoration: BoxDecoration(
-                  color: selected ? Colors.purple.shade50 : Colors.white,
-                  borderRadius: BorderRadius.circular(12),
+                  color: selected ? _medicalMint : Colors.white,
+                  borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: selected ? Colors.purple.shade400 : Colors.grey.shade200,
+                    color: selected ? _medicalTeal : Colors.grey.shade200,
                     width: selected ? 1.4 : 1,
                   ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.03),
+                      blurRadius: 10,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
                 ),
-                child: ListTile(
-                  dense: true,
-                  onTap: () => setState(() => _selectedStudentName = student.studentName),
-                  leading: CircleAvatar(
-                    radius: 22,
-                    backgroundColor: Colors.purple.shade100,
-                    backgroundImage: student.photoUrl == null
-                        ? null
-                        : NetworkImage(student.photoUrl!),
-                    child: student.photoUrl == null
-                        ? Text(
-                            student.studentName.characters.first,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          )
-                        : null,
-                  ),
-                  title: Text(
-                    student.studentName,
-                    style: const TextStyle(
-                      fontFamily: 'SF Pro Text',
-                      fontWeight: FontWeight.w700,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => _selectStudent(student.studentName),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      children: [
+                        Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 22,
+                              backgroundColor: _medicalMint,
+                              backgroundImage: student.photoUrl == null
+                                  ? null
+                                  : NetworkImage(student.photoUrl!),
+                              child: student.photoUrl == null
+                                  ? Text(
+                                      student.studentName.characters.first,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    student.studentName,
+                                    style: const TextStyle(
+                                      fontFamily: 'SF Pro Text',
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Score $score · Citas ${student.appointments.length}',
+                                    style: TextStyle(
+                                      color: Colors.grey[700],
+                                      fontFamily: 'SF Pro Text',
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            RiskPill(level: student.riskLevel),
+                          ],
+                        ),
+                        if (latest != null) ...[
+                          const SizedBox(height: 10),
+                          _clinicalGauge(
+                            label: 'WHO-5',
+                            value: latest.who5Percent,
+                            maxValue: 100,
+                            color: _medicalTeal,
+                            highIsGood: true,
+                          ),
+                          const SizedBox(height: 6),
+                          _clinicalGauge(
+                            label: 'PHQ-2',
+                            value: latest.phq2Score,
+                            maxValue: 6,
+                            color: const Color(0xFFB54708),
+                            highIsGood: false,
+                          ),
+                          const SizedBox(height: 6),
+                          _clinicalGauge(
+                            label: 'GAD-2',
+                            value: latest.gad2Score,
+                            maxValue: 6,
+                            color: const Color(0xFFB42318),
+                            highIsGood: false,
+                          ),
+                        ],
+                      ],
                     ),
                   ),
-                  subtitle: Text(
-                    'Score $score · Citas ${student.appointments.length}',
-                    style: TextStyle(
-                      color: Colors.grey[700],
-                      fontFamily: 'SF Pro Text',
-                    ),
-                  ),
-                  trailing: RiskPill(level: student.riskLevel),
                 ),
               );
             }).toList(),
@@ -2784,13 +4283,18 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
 
         final detailPanel = _surfaceCard(
           title: selectedStudent == null
-              ? 'Resumen del Paciente'
-              : 'Resumen de ${selectedStudent.studentName}',
-          subtitle: 'Estado actual, alertas y hallazgos recientes.',
+              ? 'Expediente del Paciente'
+              : 'Expediente de ${selectedStudent.studentName}',
+          subtitle: 'Ficha clinica completa para seguimiento profesional.',
           icon: Icons.badge_outlined,
           child: selectedStudent == null
               ? Text(
                   'Selecciona un paciente para ver su detalle clinico.',
+                  style: TextStyle(color: Colors.grey[700]),
+                )
+              : selectedRecord == null
+              ? Text(
+                  'No se encontro expediente editable para este paciente.',
                   style: TextStyle(color: Colors.grey[700]),
                 )
               : Column(
@@ -2811,13 +4315,37 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 12),
+                    _buildExpedienteSnapshot(selectedStudent),
                     if (selectedStudent.latestCheckIn != null) ...[
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _statusMetric(
+                            'WHO-5',
+                            selectedStudent.latestCheckIn!.who5Percent,
+                            _medicalTeal,
+                          ),
+                          _statusMetric(
+                            'PHQ-2',
+                            selectedStudent.latestCheckIn!.phq2Score,
+                            const Color(0xFFB54708),
+                          ),
+                          _statusMetric(
+                            'GAD-2',
+                            selectedStudent.latestCheckIn!.gad2Score,
+                            const Color(0xFFB42318),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 10),
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
+                          color: _medicalMint,
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
@@ -2830,122 +4358,115 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
                       ),
                     ],
                     const SizedBox(height: 12),
-                    Text(
-                      'Tratamiento Activo',
-                      style: TextStyle(
-                        color: Colors.purple[800],
-                        fontFamily: 'SF Pro Display',
-                        fontWeight: FontWeight.w700,
-                      ),
+                    _expedienteSectionBlock(
+                      title: 'Contacto y datos relevantes',
+                      subtitle: 'Identificacion, contacto y marco del caso.',
+                      icon: Icons.contact_page_outlined,
+                      child: _buildContactAndRelevantSection(selectedStudent),
                     ),
-                    const SizedBox(height: 8),
-                    if (treatmentPlans.isEmpty)
-                      Text(
-                        'Sin plan asignado todavia.',
-                        style: TextStyle(color: Colors.grey[700]),
-                      )
-                    else
-                      ...treatmentPlans.take(2).map((plan) {
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade50,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: Colors.grey.shade200),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                plan.title,
-                                style: const TextStyle(
-                                  fontFamily: 'SF Pro Text',
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              if (plan.summary.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(plan.summary),
-                              ],
-                              const SizedBox(height: 8),
-                              ...plan.tasks.map((task) {
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 4),
+                    const SizedBox(height: 12),
+                    _expedienteSectionBlock(
+                      title: 'Evolucion de escalas y check-ins',
+                      subtitle: 'Registro temporal de WHO-5, PHQ-2 y GAD-2.',
+                      icon: Icons.monitor_heart_outlined,
+                      child: _buildCheckInEvolution(selectedStudent),
+                    ),
+                    const SizedBox(height: 12),
+                    _expedienteSectionBlock(
+                      title: 'Contexto con inputs y evidencia obtenida',
+                      subtitle: 'Señales clinicas derivadas de entradas y analisis.',
+                      icon: Icons.dataset_outlined,
+                      child: _buildInputContextSection(selectedStudent),
+                    ),
+                    const SizedBox(height: 12),
+                    _expedienteSectionBlock(
+                      title: 'Adherencia al tratamiento',
+                      subtitle: 'Cumplimiento de actividades terapeuticas.',
+                      icon: Icons.task_alt_rounded,
+                      child: _buildTreatmentAdherence(selectedStudent),
+                    ),
+                    const SizedBox(height: 12),
+                    _expedienteSectionBlock(
+                      title: 'Historial de citas',
+                      subtitle: 'Seguimiento de asistencia y estado de agenda.',
+                      icon: Icons.event_note_outlined,
+                      child: _buildAppointmentHistory(selectedStudent),
+                    ),
+                    const SizedBox(height: 12),
+                    _expedienteSectionBlock(
+                      title: 'Linea de tiempo clinica',
+                      subtitle: 'Eventos relevantes del caso en orden cronologico.',
+                      icon: Icons.timeline_outlined,
+                      child: _buildClinicalTimeline(selectedStudent),
+                    ),
+                    const SizedBox(height: 12),
+                    _expedienteSectionBlock(
+                      title: 'Notas del profesional',
+                      subtitle: 'Anotaciones editables de seguimiento.',
+                      icon: Icons.edit_note_outlined,
+                      child: _buildProfessionalNotesSection(selectedStudent),
+                    ),
+                    const SizedBox(height: 12),
+                    _expedienteSectionBlock(
+                      title: 'Bitacora editable del caso',
+                      subtitle: 'Registro operativo y clinico del paciente.',
+                      icon: Icons.menu_book_outlined,
+                      child: _buildBitacoraSection(selectedStudent),
+                    ),
+                    const SizedBox(height: 12),
+                    _expedienteSectionBlock(
+                      title: 'Alertas activas recientes',
+                      subtitle: 'Incidentes y focos de atencion inmediata.',
+                      icon: Icons.notification_important_outlined,
+                      child: alerts.isEmpty
+                          ? Text(
+                              'Sin alertas registradas para este paciente.',
+                              style: TextStyle(color: Colors.grey[700]),
+                            )
+                          : Column(
+                              children: alerts.map((alert) {
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFF8E8),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: const Color(0xFFF7D8A0),
+                                    ),
+                                  ),
                                   child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Icon(
-                                        task.completed
-                                            ? Icons.check_circle_rounded
-                                            : Icons.radio_button_unchecked,
-                                        size: 18,
-                                        color: task.completed
-                                            ? Colors.green.shade700
-                                            : Colors.grey.shade500,
+                                        Icons.warning_amber_rounded,
+                                        color: Colors.orange[700],
                                       ),
                                       const SizedBox(width: 8),
-                                      Expanded(child: Text(task.title)),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              alert.title,
+                                              style: const TextStyle(
+                                                fontFamily: 'SF Pro Text',
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(alert.detail),
+                                          ],
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 );
-                              }),
-                            ],
-                          ),
-                        );
-                      }),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Alertas Recientes',
-                      style: TextStyle(
-                        color: Colors.purple[800],
-                        fontFamily: 'SF Pro Display',
-                        fontWeight: FontWeight.w700,
-                      ),
+                              }).toList(),
+                            ),
                     ),
-                    const SizedBox(height: 8),
-                    if (alerts.isEmpty)
-                      Text(
-                        'Sin alertas registradas para este paciente.',
-                        style: TextStyle(color: Colors.grey[700]),
-                      )
-                    else
-                      ...alerts.map((alert) {
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFFFF8E8),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0xFFF7D8A0)),
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                Icons.warning_amber_rounded,
-                                color: Colors.orange[700],
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      alert.title,
-                                      style: const TextStyle(
-                                        fontFamily: 'SF Pro Text',
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(alert.detail),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }),
                   ],
                 ),
         );
@@ -2964,17 +4485,20 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
                   ChoiceChip(
                     label: const Text('Todas'),
                     selected: _agendaStatusFilter == null,
-                    onSelected: (_) => setState(() => _agendaStatusFilter = null),
+                    onSelected: (_) =>
+                        setState(() => _agendaStatusFilter = null),
                   ),
                   ChoiceChip(
                     label: const Text('Pendientes'),
                     selected: _agendaStatusFilter == AppointmentStatus.pending,
-                    onSelected: (_) =>
-                        setState(() => _agendaStatusFilter = AppointmentStatus.pending),
+                    onSelected: (_) => setState(
+                      () => _agendaStatusFilter = AppointmentStatus.pending,
+                    ),
                   ),
                   ChoiceChip(
                     label: const Text('Confirmadas'),
-                    selected: _agendaStatusFilter == AppointmentStatus.confirmed,
+                    selected:
+                        _agendaStatusFilter == AppointmentStatus.confirmed,
                     onSelected: (_) => setState(
                       () => _agendaStatusFilter = AppointmentStatus.confirmed,
                     ),
@@ -2982,8 +4506,9 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
                   ChoiceChip(
                     label: const Text('Rechazadas'),
                     selected: _agendaStatusFilter == AppointmentStatus.declined,
-                    onSelected: (_) =>
-                        setState(() => _agendaStatusFilter = AppointmentStatus.declined),
+                    onSelected: (_) => setState(
+                      () => _agendaStatusFilter = AppointmentStatus.declined,
+                    ),
                   ),
                 ],
               ),
@@ -2994,60 +4519,82 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
                   style: TextStyle(color: Colors.grey[700]),
                 )
               else
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columns: const [
-                      DataColumn(label: Text('Paciente')),
-                      DataColumn(label: Text('Inicio')),
-                      DataColumn(label: Text('Fin')),
-                      DataColumn(label: Text('Estado')),
-                      DataColumn(label: Text('Auditoria')),
-                      DataColumn(label: Text('Motivo')),
-                    ],
-                    rows: _filteredAgendaItems.map((entry) {
-                      final start = entry.appointment.scheduledFor;
-                      final end = entry.appointment.endAt;
-                      final startLabel = _formatDate(start);
-                      final endLabel =
-                          '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
-                      final latestEvent = entry.appointment.statusHistory.isEmpty
-                          ? null
-                          : entry.appointment.statusHistory.last;
-                      final auditLabel = latestEvent == null
-                          ? '-'
-                          : '${_actorLabel(latestEvent.actor)} · ${_formatDate(latestEvent.changedAt)}';
+                Column(
+                  children: _filteredAgendaItems.map((entry) {
+                    final start = entry.appointment.scheduledFor;
+                    final end = entry.appointment.endAt;
+                    final hhStart =
+                        '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}';
+                    final hhEnd =
+                        '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
+                    final latestEvent = entry.appointment.statusHistory.isEmpty
+                        ? null
+                        : entry.appointment.statusHistory.last;
 
-                      return DataRow(
-                        cells: [
-                          DataCell(Text(entry.student.studentName)),
-                          DataCell(Text(startLabel)),
-                          DataCell(Text(endLabel)),
-                          DataCell(
-                            _appointmentStatusBadge(entry.appointment.status),
-                          ),
-                          DataCell(
-                            SizedBox(
-                              width: 220,
-                              child: Text(
-                                auditLabel,
-                                overflow: TextOverflow.ellipsis,
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _medicalMint,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '$hhStart - $hhEnd',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
                               ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  entry.student.studentName,
+                                  style: const TextStyle(
+                                    fontFamily: 'SF Pro Text',
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              _appointmentStatusBadge(entry.appointment.status),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            entry.appointment.reason,
+                            style: TextStyle(
+                              color: Colors.grey[800],
+                              fontFamily: 'SF Pro Text',
                             ),
                           ),
-                          DataCell(
-                            SizedBox(
-                              width: 280,
-                              child: Text(
-                                entry.appointment.reason,
-                                overflow: TextOverflow.ellipsis,
+                          if (latestEvent != null) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              'Ultimo cambio: ${_actorLabel(latestEvent.actor)} · ${_formatDate(latestEvent.changedAt)}',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
                               ),
                             ),
-                          ),
+                          ],
                         ],
-                      );
-                    }).toList(),
-                  ),
+                      ),
+                    );
+                  }).toList(),
                 ),
             ],
           ),
@@ -3068,27 +4615,33 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
                     _statusMetric(
                       'Pendientes',
                       _agendaItems
-                          .where((item) =>
-                              item.appointment.status ==
-                              AppointmentStatus.pending)
+                          .where(
+                            (item) =>
+                                item.appointment.status ==
+                                AppointmentStatus.pending,
+                          )
                           .length,
                       const Color(0xFFB54708),
                     ),
                     _statusMetric(
                       'Confirmadas',
                       _agendaItems
-                          .where((item) =>
-                              item.appointment.status ==
-                              AppointmentStatus.confirmed)
+                          .where(
+                            (item) =>
+                                item.appointment.status ==
+                                AppointmentStatus.confirmed,
+                          )
                           .length,
                       const Color(0xFF067647),
                     ),
                     _statusMetric(
                       'Rechazadas',
                       _agendaItems
-                          .where((item) =>
-                              item.appointment.status ==
-                              AppointmentStatus.declined)
+                          .where(
+                            (item) =>
+                                item.appointment.status ==
+                                AppointmentStatus.declined,
+                          )
                           .length,
                       const Color(0xFFB42318),
                     ),
@@ -3097,7 +4650,7 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
-                value: _selectedStudentName,
+                initialValue: _selectedStudentName,
                 decoration: const InputDecoration(labelText: 'Paciente'),
                 items: widget.students
                     .map(
@@ -3109,7 +4662,7 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
                     .toList(),
                 onChanged: (value) {
                   if (value == null) return;
-                  setState(() => _selectedStudentName = value);
+                  _selectStudent(value);
                   _applySuggestedSlot();
                 },
               ),
@@ -3150,7 +4703,7 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<int>(
-                value: _selectedDurationMinutes,
+                initialValue: _selectedDurationMinutes,
                 decoration: const InputDecoration(labelText: 'Duracion'),
                 items: const [30, 45, 60]
                     .map(
@@ -3305,6 +4858,17 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Expanded(child: loadPanel),
+                const SizedBox(width: 12),
+                Expanded(child: heatmapPanel),
+                const SizedBox(width: 12),
+                Expanded(child: rankingPanel),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Expanded(flex: 33, child: patientPanel),
                 const SizedBox(width: 12),
                 Expanded(
@@ -3332,6 +4896,17 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
           children: [
             headerCard,
             const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: loadPanel),
+                const SizedBox(width: 12),
+                Expanded(child: heatmapPanel),
+              ],
+            ),
+            const SizedBox(height: 12),
+            rankingPanel,
+            const SizedBox(height: 12),
             patientPanel,
             const SizedBox(height: 12),
             Row(
@@ -3355,6 +4930,12 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
           children: [
             headerCard,
             const SizedBox(height: 12),
+            loadPanel,
+            const SizedBox(height: 12),
+            heatmapPanel,
+            const SizedBox(height: 12),
+            rankingPanel,
+            const SizedBox(height: 12),
             patientPanel,
             const SizedBox(height: 12),
             detailPanel,
@@ -3372,7 +4953,7 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
         return Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [Colors.grey.shade100, Colors.purple.shade50],
+              colors: [const Color(0xFFF5FBFF), const Color(0xFFF3F9F8)],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
             ),
@@ -3413,10 +4994,10 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
                   width: 34,
                   height: 34,
                   decoration: BoxDecoration(
-                    color: Colors.purple.shade100,
+                    color: _medicalMint,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(icon, color: Colors.purple.shade700, size: 18),
+                  child: Icon(icon, color: _medicalBlue, size: 18),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -3426,7 +5007,7 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
                       Text(
                         title,
                         style: TextStyle(
-                          color: Colors.purple[800],
+                          color: _medicalBlue,
                           fontFamily: 'SF Pro Display',
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
@@ -3454,14 +5035,905 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
     );
   }
 
+  Widget _expedienteSectionBlock({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Widget child,
+  }) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _medicalTeal.withOpacity(0.24)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: _medicalMint,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, size: 18, color: _medicalBlue),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: _medicalBlue,
+                          fontFamily: 'SF Pro Display',
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          color: Colors.grey[700],
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpedienteSnapshot(StudentCase student) {
+    final openedAt = _firstClinicalRecord(student);
+    final lastContact = _latestClinicalContact(student);
+    final completion = _treatmentCompletionPercent(student);
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _expedienteInfoTile(
+          label: 'Caso abierto',
+          value: openedAt == null ? 'Sin fecha' : _formatDate(openedAt),
+          icon: Icons.assignment_ind_outlined,
+          color: _medicalBlue,
+        ),
+        _expedienteInfoTile(
+          label: 'Ultimo contacto',
+          value: lastContact == null
+              ? 'Sin contacto'
+              : _formatDate(lastContact),
+          icon: Icons.contact_phone_outlined,
+          color: _medicalTeal,
+        ),
+        _expedienteInfoTile(
+          label: 'Adherencia global',
+          value: '$completion%',
+          icon: Icons.task_alt_rounded,
+          color: const Color(0xFF067647),
+        ),
+        _expedienteInfoTile(
+          label: 'Alertas acumuladas',
+          value: '${student.alerts.length}',
+          icon: Icons.warning_amber_rounded,
+          color: const Color(0xFFB54708),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildContactAndRelevantSection(StudentCase student) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        children: [
+          TextField(
+            controller: _contactPhoneController,
+            decoration: const InputDecoration(
+              labelText: 'Telefono del alumno',
+              prefixIcon: Icon(Icons.call_outlined),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _contactEmailController,
+            decoration: const InputDecoration(
+              labelText: 'Correo institucional',
+              prefixIcon: Icon(Icons.alternate_email_rounded),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _contactGuardianController,
+            decoration: const InputDecoration(
+              labelText: 'Tutor o contacto principal',
+              prefixIcon: Icon(Icons.family_restroom_outlined),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _contactEmergencyController,
+            decoration: const InputDecoration(
+              labelText: 'Contacto de emergencia',
+              prefixIcon: Icon(Icons.emergency_outlined),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _contactMetaController,
+            decoration: const InputDecoration(
+              labelText: 'Datos relevantes (grupo, turno, observaciones)',
+              prefixIcon: Icon(Icons.info_outline_rounded),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _clinicalContextController,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              labelText: 'Contexto clinico del caso',
+              alignLabelWithHint: true,
+              prefixIcon: Icon(Icons.description_outlined),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: ElevatedButton.icon(
+              onPressed: _saveContactAndContext,
+              icon: const Icon(Icons.save_outlined),
+              label: const Text('Guardar datos del expediente'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInputContextSection(StudentCase student) {
+    final latestCheckIn = student.latestCheckIn;
+    final latestReflection = student.reflections.isEmpty
+        ? null
+        : student.reflections.last;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: _medicalMint,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _medicalTeal.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Inputs recientes',
+            style: TextStyle(
+              color: _medicalBlue,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            latestCheckIn == null
+                ? 'No hay check-in reciente.'
+                : 'Check-in ${_formatDate(latestCheckIn.date)} · respuestas: ${latestCheckIn.answers.isEmpty ? 'sin detalle' : latestCheckIn.answers.entries.map((e) => 'P${e.key}:${e.value}').join(', ')}',
+          ),
+          const SizedBox(height: 6),
+          Text(
+            latestReflection == null
+                ? 'Sin reflexion reciente para analisis contextual.'
+                : 'Fuente: ${latestReflection.source} · riesgo detectado: ${latestReflection.detectedRisk.name}',
+          ),
+          if (latestReflection != null) ...[
+            const SizedBox(height: 6),
+            Text('Hallazgos: ${latestReflection.detectedFindings.join(', ')}'),
+            const SizedBox(height: 4),
+            Text('Evidencia: ${latestReflection.evidenceTerms.join(', ')}'),
+            const SizedBox(height: 4),
+            Text('Razonamiento: ${latestReflection.reasoningSummary}'),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProfessionalNotesSection(StudentCase student) {
+    final record = _recordsByStudent[student.studentName];
+    if (record == null) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        children: [
+          TextField(
+            controller: _professionalNoteController,
+            maxLines: 3,
+            decoration: InputDecoration(
+              labelText: _editingNoteIndex == null
+                  ? 'Nueva anotacion profesional'
+                  : 'Editar anotacion #${_editingNoteIndex! + 1}',
+              alignLabelWithHint: true,
+              prefixIcon: const Icon(Icons.note_alt_outlined),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _saveProfessionalNote,
+                  icon: const Icon(Icons.note_add_outlined),
+                  label: Text(
+                    _editingNoteIndex == null ? 'Agregar nota' : 'Actualizar nota',
+                  ),
+                ),
+              ),
+              if (_editingNoteIndex != null) ...[
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed: () {
+                    setState(() {
+                      _editingNoteIndex = null;
+                      _professionalNoteController.clear();
+                    });
+                  },
+                  child: const Text('Cancelar'),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (record.notes.isEmpty)
+            Text(
+              'Sin anotaciones profesionales.',
+              style: TextStyle(color: Colors.grey[700]),
+            )
+          else
+            ...record.notes.take(8).toList().asMap().entries.map((entry) {
+              final index = entry.key;
+              final note = entry.value;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${note.author} · ${_formatDate(note.createdAt)}',
+                            style: TextStyle(
+                              color: Colors.grey[700],
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          onPressed: () => _beginEditNote(index, note.text),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 18),
+                          onPressed: () => _deleteNote(index),
+                        ),
+                      ],
+                    ),
+                    Text(note.text),
+                    if (note.updatedAt != null)
+                      Text(
+                        'Editada: ${_formatDate(note.updatedAt!)}',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 11),
+                      ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBitacoraSection(StudentCase student) {
+    final record = _recordsByStudent[student.studentName];
+    if (record == null) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: _bitacoraType,
+                  decoration: const InputDecoration(labelText: 'Tipo de entrada'),
+                  items: const [
+                    DropdownMenuItem(value: 'Seguimiento', child: Text('Seguimiento')),
+                    DropdownMenuItem(value: 'Sesion', child: Text('Sesion')),
+                    DropdownMenuItem(value: 'Contacto', child: Text('Contacto')),
+                    DropdownMenuItem(value: 'Incidencia', child: Text('Incidencia')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _bitacoraType = value);
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _bitacoraController,
+            maxLines: 3,
+            decoration: InputDecoration(
+              labelText: _editingBitacoraIndex == null
+                  ? 'Entrada de bitacora'
+                  : 'Editar entrada #${_editingBitacoraIndex! + 1}',
+              alignLabelWithHint: true,
+              prefixIcon: const Icon(Icons.edit_calendar_outlined),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _saveBitacoraEntry,
+                  icon: const Icon(Icons.post_add_outlined),
+                  label: Text(
+                    _editingBitacoraIndex == null
+                        ? 'Agregar a bitacora'
+                        : 'Actualizar entrada',
+                  ),
+                ),
+              ),
+              if (_editingBitacoraIndex != null) ...[
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed: () {
+                    setState(() {
+                      _editingBitacoraIndex = null;
+                      _bitacoraController.clear();
+                      _bitacoraType = 'Seguimiento';
+                    });
+                  },
+                  child: const Text('Cancelar'),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (record.bitacora.isEmpty)
+            Text(
+              'Sin eventos registrados en bitacora.',
+              style: TextStyle(color: Colors.grey[700]),
+            )
+          else
+            ...record.bitacora
+                .take(10)
+                .toList()
+                .asMap()
+                .entries
+                .map((entryMap) {
+              final index = entryMap.key;
+              final entry = entryMap.value;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.grey.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '[${entry.type}] ${_formatDate(entry.createdAt)}',
+                      style: TextStyle(
+                        color: Colors.grey[700],
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(entry.text),
+                    const SizedBox(height: 2),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          onPressed: () => _beginEditBitacora(index, entry),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 18),
+                          onPressed: () => _deleteBitacoraEntry(index),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _expedienteInfoTile({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      width: 230,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.28)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 17),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.grey[700],
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCheckInEvolution(StudentCase student) {
+    final history = [...student.checkIns]
+      ..sort((a, b) => b.date.compareTo(a.date));
+
+    if (history.isEmpty) {
+      return Text(
+        'Aun no hay historial de check-ins para evaluar tendencia.',
+        style: TextStyle(color: Colors.grey[700]),
+      );
+    }
+
+    return Column(
+      children: history.take(5).map((checkIn) {
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _formatDate(checkIn.date),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  RiskPill(level: checkIn.riskLevel),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _statusMetric('WHO-5', checkIn.who5Percent, _medicalTeal),
+                  _statusMetric(
+                    'PHQ-2',
+                    checkIn.phq2Score,
+                    const Color(0xFFB54708),
+                  ),
+                  _statusMetric(
+                    'GAD-2',
+                    checkIn.gad2Score,
+                    const Color(0xFFB42318),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildTreatmentAdherence(StudentCase student) {
+    final plans = student.treatmentPlans;
+    if (plans.isEmpty) {
+      return Text(
+        'Sin planes de tratamiento asignados en el expediente.',
+        style: TextStyle(color: Colors.grey[700]),
+      );
+    }
+
+    return Column(
+      children: plans.take(4).map((plan) {
+        final total = plan.tasks.length;
+        final done = plan.tasks.where((task) => task.completed).length;
+        final ratio = total == 0 ? 0.0 : done / total;
+        final percent = (ratio * 100).round();
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                plan.title,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: LinearProgressIndicator(
+                  value: ratio,
+                  minHeight: 8,
+                  backgroundColor: Colors.grey.shade200,
+                  valueColor: const AlwaysStoppedAnimation<Color>(
+                    Color(0xFF067647),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '$done/$total tareas completadas ($percent%)',
+                style: TextStyle(color: Colors.grey[700], fontSize: 12),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildAppointmentHistory(StudentCase student) {
+    final appointments = [...student.appointments]
+      ..sort((a, b) => b.scheduledFor.compareTo(a.scheduledFor));
+
+    if (appointments.isEmpty) {
+      return Text(
+        'No hay citas registradas en el expediente.',
+        style: TextStyle(color: Colors.grey[700]),
+      );
+    }
+
+    return Column(
+      children: appointments.take(6).map((appointment) {
+        final latest = appointment.statusHistory.isEmpty
+            ? null
+            : appointment.statusHistory.last;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 60,
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                decoration: BoxDecoration(
+                  color: _medicalMint,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  '${appointment.scheduledFor.hour.toString().padLeft(2, '0')}:${appointment.scheduledFor.minute.toString().padLeft(2, '0')}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _formatDate(appointment.scheduledFor),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(appointment.reason),
+                    if (latest != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Ultimo estado: ${_actorLabel(latest.actor)} · ${latest.note}',
+                        style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              _appointmentStatusBadge(appointment.status),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildClinicalTimeline(StudentCase student) {
+    final events = _expedienteEvents(student);
+    if (events.isEmpty) {
+      return Text(
+        'No hay eventos clinicos suficientes para generar timeline.',
+        style: TextStyle(color: Colors.grey[700]),
+      );
+    }
+
+    return Column(
+      children: events.take(8).map((event) {
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                margin: const EdgeInsets.only(top: 2),
+                decoration: BoxDecoration(
+                  color: event.color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(event.icon, size: 16, color: event.color),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              event.title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            _formatDate(event.date),
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(event.detail),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  List<_ExpedienteEvent> _expedienteEvents(StudentCase student) {
+    final events = <_ExpedienteEvent>[];
+    final record = _recordsByStudent[student.studentName];
+
+    for (final alert in student.alerts) {
+      events.add(
+        _ExpedienteEvent(
+          date: alert.createdAt,
+          title: 'Alerta profesional: ${alert.title}',
+          detail: alert.detail,
+          icon: Icons.warning_amber_rounded,
+          color: const Color(0xFFB54708),
+        ),
+      );
+    }
+
+    for (final reflection in student.reflections) {
+      events.add(
+        _ExpedienteEvent(
+          date: reflection.createdAt,
+          title: 'Reflexion del alumno (${reflection.source})',
+          detail: reflection.interpretation,
+          icon: Icons.psychology_alt_outlined,
+          color: _medicalTeal,
+        ),
+      );
+    }
+
+    for (final appointment in student.appointments) {
+      for (final change in appointment.statusHistory) {
+        events.add(
+          _ExpedienteEvent(
+            date: change.changedAt,
+            title: 'Cambio de cita: ${appointment.reason}',
+            detail: '${_actorLabel(change.actor)} · ${change.note}',
+            icon: Icons.event_note_rounded,
+            color: _medicalBlue,
+          ),
+        );
+      }
+    }
+
+    if (record != null) {
+      for (final note in record.notes) {
+        events.add(
+          _ExpedienteEvent(
+            date: note.updatedAt ?? note.createdAt,
+            title: 'Nota profesional',
+            detail: note.text,
+            icon: Icons.sticky_note_2_outlined,
+            color: const Color(0xFF155EEF),
+          ),
+        );
+      }
+      for (final entry in record.bitacora) {
+        events.add(
+          _ExpedienteEvent(
+            date: entry.createdAt,
+            title: 'Bitacora: ${entry.type}',
+            detail: entry.text,
+            icon: Icons.menu_book_outlined,
+            color: _medicalTeal,
+          ),
+        );
+      }
+    }
+
+    events.sort((a, b) => b.date.compareTo(a.date));
+    return events;
+  }
+
+  int _treatmentCompletionPercent(StudentCase student) {
+    final tasks = student.treatmentPlans.expand((plan) => plan.tasks).toList();
+    if (tasks.isEmpty) return 0;
+    final completed = tasks.where((task) => task.completed).length;
+    return ((completed / tasks.length) * 100).round();
+  }
+
+  DateTime? _firstClinicalRecord(StudentCase student) {
+    final dates = <DateTime>[
+      ...student.checkIns.map((item) => item.date),
+      ...student.reflections.map((item) => item.createdAt),
+      ...student.alerts.map((item) => item.createdAt),
+      ...student.appointments.map((item) => item.createdAt),
+      ...student.treatmentPlans.map((item) => item.createdAt),
+    ];
+    if (dates.isEmpty) return null;
+    dates.sort();
+    return dates.first;
+  }
+
+  DateTime? _latestClinicalContact(StudentCase student) {
+    final dates = <DateTime>[
+      ...student.checkIns.map((item) => item.date),
+      ...student.reflections.map((item) => item.createdAt),
+      ...student.alerts.map((item) => item.createdAt),
+      ...student.appointments.map((item) => item.scheduledFor),
+      ...student.appointments.expand(
+        (item) => item.statusHistory.map((s) => s.changedAt),
+      ),
+    ];
+    if (dates.isEmpty) return null;
+    dates.sort((a, b) => b.compareTo(a));
+    return dates.first;
+  }
+
   Widget _appointmentStatusBadge(AppointmentStatus status) {
     switch (status) {
       case AppointmentStatus.pending:
-        return _pill('Pendiente', const Color(0xFFFFF4E5), const Color(0xFFB54708));
+        return _pill(
+          'Pendiente',
+          const Color(0xFFFFF4E5),
+          const Color(0xFFB54708),
+        );
       case AppointmentStatus.confirmed:
-        return _pill('Confirmada', const Color(0xFFE9F9EE), const Color(0xFF067647));
+        return _pill(
+          'Confirmada',
+          const Color(0xFFE9F9EE),
+          const Color(0xFF067647),
+        );
       case AppointmentStatus.declined:
-        return _pill('Rechazada', const Color(0xFFFFE3E3), const Color(0xFFB42318));
+        return _pill(
+          'Rechazada',
+          const Color(0xFFFFE3E3),
+          const Color(0xFFB42318),
+        );
     }
   }
 
@@ -3480,9 +5952,9 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: color.withOpacity(0.12),
         borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: color.withOpacity(0.35)),
+        border: Border.all(color: color.withOpacity(0.45)),
       ),
       child: Text(
         '$label: $value',
@@ -3522,12 +5994,16 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
     required IconData icon,
     Color? accent,
   }) {
-    final color = accent ?? Colors.purple.shade700;
+    final color = accent ?? _medicalBlue;
     return Container(
       width: 220,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        gradient: LinearGradient(
+          colors: [Colors.white, color.withOpacity(0.08)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade200),
       ),
@@ -3566,6 +6042,393 @@ class _ProfessionalDashboardState extends State<ProfessionalDashboard> {
     );
   }
 
+  Widget _medicalHeroCard({
+    required int avgWellbeing,
+    required int highRisk,
+    required int mediumRisk,
+    required int pendingCount,
+    required int confirmedCount,
+    required int declinedCount,
+    required Widget child,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0B4A6F), Color(0xFF0A7B83)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: _medicalBlue.withOpacity(0.22),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.local_hospital_rounded, color: Colors.white),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Centro de Monitoreo Clinico',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontFamily: 'SF Pro Display',
+                      fontWeight: FontWeight.w700,
+                      fontSize: 20,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Triage en tiempo real · Bienestar promedio: $avgWellbeing/100',
+              style: const TextStyle(color: Color(0xFFD8F4F3), fontSize: 13),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _heroChip(
+                  'Riesgo alto: $highRisk',
+                  const Color(0xFFFFE3E3),
+                  const Color(0xFFB42318),
+                ),
+                _heroChip(
+                  'Riesgo medio: $mediumRisk',
+                  const Color(0xFFFFF4E5),
+                  const Color(0xFFB54708),
+                ),
+                _heroChip(
+                  'Pendientes: $pendingCount',
+                  const Color(0xFFFFF4E5),
+                  const Color(0xFFB54708),
+                ),
+                _heroChip(
+                  'Confirmadas: $confirmedCount',
+                  const Color(0xFFE9F9EE),
+                  const Color(0xFF067647),
+                ),
+                _heroChip(
+                  'Rechazadas: $declinedCount',
+                  const Color(0xFFFFE3E3),
+                  const Color(0xFFB42318),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            child,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _heroChip(String text, Color bg, Color fg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+
+  Widget _clinicalGauge({
+    required String label,
+    required int value,
+    required int maxValue,
+    required Color color,
+    required bool highIsGood,
+  }) {
+    final ratio = maxValue <= 0 ? 0.0 : (value / maxValue).clamp(0.0, 1.0);
+    final displayRatio = highIsGood ? ratio : (1 - ratio);
+    return Row(
+      children: [
+        SizedBox(
+          width: 54,
+          child: Text(
+            '$label:',
+            style: TextStyle(
+              color: Colors.grey[700],
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              value: displayRatio,
+              minHeight: 8,
+              backgroundColor: Colors.grey.shade200,
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 32,
+          child: Text(
+            '$value',
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  _ClinicalLoadState _clinicalLoadState({
+    required int highRisk,
+    required int pendingCount,
+    required int appointmentsToday,
+    required int avgWellbeing,
+  }) {
+    final pressure = highRisk * 3 + pendingCount * 2 + appointmentsToday;
+    if (pressure >= 12 || avgWellbeing < 45) {
+      return const _ClinicalLoadState(
+        label: 'ALTA',
+        detail: 'Se recomienda priorizar triage y redistribuir agenda.',
+        color: Color(0xFFB42318),
+        icon: Icons.warning_amber_rounded,
+      );
+    }
+    if (pressure >= 7 || avgWellbeing < 60) {
+      return const _ClinicalLoadState(
+        label: 'MEDIA',
+        detail: 'Carga estable con necesidad de monitoreo activo.',
+        color: Color(0xFFB54708),
+        icon: Icons.timelapse_rounded,
+      );
+    }
+    return const _ClinicalLoadState(
+      label: 'CONTROLADA',
+      detail: 'Operacion dentro de rango recomendado.',
+      color: Color(0xFF067647),
+      icon: Icons.check_circle_rounded,
+    );
+  }
+
+  Map<int, int> _agendaHeatmapData() {
+    final now = DateTime.now();
+    final limit = now.add(const Duration(days: 7));
+    final data = <int, int>{for (final hour in _heatmapHours) hour: 0};
+
+    for (final item in _agendaItems) {
+      final startsAt = item.appointment.scheduledFor;
+      if (startsAt.isBefore(now) || startsAt.isAfter(limit)) continue;
+      if (data.containsKey(startsAt.hour)) {
+        data[startsAt.hour] = data[startsAt.hour]! + 1;
+      }
+    }
+    return data;
+  }
+
+  List<_CriticalCase> _criticalRanking() {
+    final ranking = widget.students.map((student) {
+      final checkIn = student.latestCheckIn;
+      final riskBase = switch (student.riskLevel) {
+        RiskLevel.high => 300,
+        RiskLevel.medium => 200,
+        RiskLevel.low => 100,
+      };
+      final wellbeingPenalty = checkIn == null
+          ? 40
+          : (100 - checkIn.wellbeingScore);
+      final symptoms = checkIn == null
+          ? 0
+          : (checkIn.phq2Score + checkIn.gad2Score) * 8;
+      final alerts = student.alerts.length * 4;
+      final score = riskBase + wellbeingPenalty + symptoms + alerts;
+      return _CriticalCase(student: student, score: score);
+    }).toList();
+
+    ranking.sort((a, b) => b.score.compareTo(a.score));
+    return ranking;
+  }
+
+  Widget _buildLoadCard(_ClinicalLoadState state) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: state.color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: state.color.withOpacity(0.45)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: state.color.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(state.icon, color: state.color),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Estado: ${state.label}',
+                  style: TextStyle(
+                    color: state.color,
+                    fontWeight: FontWeight.w800,
+                    fontFamily: 'SF Pro Display',
+                    fontSize: 18,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(state.detail, style: TextStyle(color: Colors.grey[800])),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAgendaHeatmap(Map<int, int> data) {
+    final maxCount = data.values.fold<int>(
+      0,
+      (prev, value) => value > prev ? value : prev,
+    );
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: _heatmapHours.map((hour) {
+        final count = data[hour] ?? 0;
+        final intensity = maxCount == 0
+            ? 0.0
+            : (count / maxCount).clamp(0.0, 1.0);
+        final bg =
+            Color.lerp(const Color(0xFFEAF4F6), _medicalTeal, intensity) ??
+            _medicalMint;
+        final fg = intensity > 0.55 ? Colors.white : _medicalBlue;
+        return Container(
+          width: 78,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _medicalTeal.withOpacity(0.25)),
+          ),
+          child: Column(
+            children: [
+              Text(
+                '${hour.toString().padLeft(2, '0')}:00',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: fg,
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '$count cita${count == 1 ? '' : 's'}',
+                style: TextStyle(color: fg, fontSize: 11),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildCriticalRanking(List<_CriticalCase> ranking) {
+    if (ranking.isEmpty) {
+      return Text(
+        'Sin pacientes en seguimiento.',
+        style: TextStyle(color: Colors.grey[700]),
+      );
+    }
+
+    return Column(
+      children: ranking.take(5).toList().asMap().entries.map((entry) {
+        final index = entry.key;
+        final critical = entry.value;
+        final student = critical.student;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: index == 0 ? const Color(0xFFFFF4E5) : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: index == 0
+                  ? const Color(0xFFEAAA08)
+                  : Colors.grey.shade200,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: _medicalMint,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  '#${index + 1}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      student.studentName,
+                      style: const TextStyle(
+                        fontFamily: 'SF Pro Text',
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      'Puntaje critico: ${critical.score}',
+                      style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              RiskPill(level: student.riskLevel),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   String _formatDate(DateTime date) {
     final hh = date.hour.toString().padLeft(2, '0');
     final mm = date.minute.toString().padLeft(2, '0');
@@ -3578,6 +6441,163 @@ class _AgendaItem {
   final ProfessionalAppointment appointment;
 
   const _AgendaItem({required this.student, required this.appointment});
+}
+
+class _ClinicalLoadState {
+  final String label;
+  final String detail;
+  final Color color;
+  final IconData icon;
+
+  const _ClinicalLoadState({
+    required this.label,
+    required this.detail,
+    required this.color,
+    required this.icon,
+  });
+}
+
+class _CriticalCase {
+  final StudentCase student;
+  final int score;
+
+  const _CriticalCase({required this.student, required this.score});
+}
+
+class _ProfessionalRecord {
+  final _PatientContactInfo contact;
+  final String clinicalContext;
+  final List<_ProfessionalNote> notes;
+  final List<_BitacoraEntry> bitacora;
+
+  const _ProfessionalRecord({
+    required this.contact,
+    required this.clinicalContext,
+    required this.notes,
+    required this.bitacora,
+  });
+
+  _ProfessionalRecord copyWith({
+    _PatientContactInfo? contact,
+    String? clinicalContext,
+    List<_ProfessionalNote>? notes,
+    List<_BitacoraEntry>? bitacora,
+  }) {
+    return _ProfessionalRecord(
+      contact: contact ?? this.contact,
+      clinicalContext: clinicalContext ?? this.clinicalContext,
+      notes: notes ?? this.notes,
+      bitacora: bitacora ?? this.bitacora,
+    );
+  }
+}
+
+class _PatientContactInfo {
+  final String phone;
+  final String email;
+  final String guardianName;
+  final String emergencyContact;
+  final String relevantMeta;
+
+  const _PatientContactInfo({
+    required this.phone,
+    required this.email,
+    required this.guardianName,
+    required this.emergencyContact,
+    required this.relevantMeta,
+  });
+
+  _PatientContactInfo copyWith({
+    String? phone,
+    String? email,
+    String? guardianName,
+    String? emergencyContact,
+    String? relevantMeta,
+  }) {
+    return _PatientContactInfo(
+      phone: phone ?? this.phone,
+      email: email ?? this.email,
+      guardianName: guardianName ?? this.guardianName,
+      emergencyContact: emergencyContact ?? this.emergencyContact,
+      relevantMeta: relevantMeta ?? this.relevantMeta,
+    );
+  }
+}
+
+class _ProfessionalNote {
+  final String id;
+  final String text;
+  final String author;
+  final DateTime createdAt;
+  final DateTime? updatedAt;
+
+  const _ProfessionalNote({
+    required this.id,
+    required this.text,
+    required this.author,
+    required this.createdAt,
+    this.updatedAt,
+  });
+
+  _ProfessionalNote copyWith({
+    String? id,
+    String? text,
+    String? author,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return _ProfessionalNote(
+      id: id ?? this.id,
+      text: text ?? this.text,
+      author: author ?? this.author,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+}
+
+class _BitacoraEntry {
+  final String id;
+  final String type;
+  final String text;
+  final DateTime createdAt;
+
+  const _BitacoraEntry({
+    required this.id,
+    required this.type,
+    required this.text,
+    required this.createdAt,
+  });
+
+  _BitacoraEntry copyWith({
+    String? id,
+    String? type,
+    String? text,
+    DateTime? createdAt,
+  }) {
+    return _BitacoraEntry(
+      id: id ?? this.id,
+      type: type ?? this.type,
+      text: text ?? this.text,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+}
+
+class _ExpedienteEvent {
+  final DateTime date;
+  final String title;
+  final String detail;
+  final IconData icon;
+  final Color color;
+
+  const _ExpedienteEvent({
+    required this.date,
+    required this.title,
+    required this.detail,
+    required this.icon,
+    required this.color,
+  });
 }
 
 class RiskPill extends StatelessWidget {

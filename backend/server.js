@@ -34,6 +34,8 @@ let eventSequence = 0;
 const realtimeEvents = [];
 const appointmentsByStudent = new Map();
 const treatmentsByStudent = new Map();
+const checkInsByStudent = new Map();
+const reflectionsByStudent = new Map();
 
 function normalizePushRole(value) {
   const role = String(value || '').trim().toLowerCase();
@@ -150,6 +152,68 @@ function sanitizeTreatmentPlan(raw) {
     assignedBy: String(raw.assignedBy || 'Profesional KAIA').slice(0, 120),
     tasks
   };
+}
+
+function sanitizeCheckIn(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const date = String(raw.date || '').trim();
+  if (!date) return null;
+
+  const answers = raw.answers && typeof raw.answers === 'object'
+    ? Object.entries(raw.answers).reduce((acc, [k, v]) => {
+        const key = Number(k);
+        const value = Number(v);
+        if (!Number.isFinite(key) || !Number.isFinite(value)) return acc;
+        acc[String(Math.trunc(key))] = Math.max(0, Math.min(3, Math.trunc(value)));
+        return acc;
+      }, {})
+    : {};
+
+  const risk = normalizeRisk(raw.riskLevel);
+
+  return {
+    date,
+    answers,
+    wellbeingScore: Math.max(0, Math.min(100, Number(raw.wellbeingScore) || 0)),
+    riskLevel: risk,
+    summary: String(raw.summary || '').slice(0, 500),
+    who5Percent: Math.max(0, Math.min(100, Number(raw.who5Percent) || 0)),
+    phq2Score: Math.max(0, Math.min(6, Number(raw.phq2Score) || 0)),
+    gad2Score: Math.max(0, Math.min(6, Number(raw.gad2Score) || 0))
+  };
+}
+
+function sortCheckIns(items) {
+  return [...items].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function sanitizeReflection(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const text = String(raw.text || '').trim().slice(0, 4000);
+  const createdAt = String(raw.createdAt || '').trim();
+  if (!text || !createdAt) return null;
+
+  const list = (value, max = 12) => Array.isArray(value)
+    ? value.map((item) => String(item || '').trim()).filter(Boolean).slice(0, max)
+    : [];
+
+  return {
+    text,
+    createdAt,
+    patterns: list(raw.patterns),
+    interpretation: String(raw.interpretation || '').trim().slice(0, 2000),
+    detectedFindings: list(raw.detectedFindings),
+    rationale: String(raw.rationale || '').trim().slice(0, 3000),
+    evidenceTerms: list(raw.evidenceTerms),
+    reasoningSummary: String(raw.reasoningSummary || '').trim().slice(0, 2000),
+    source: String(raw.source || '').trim().slice(0, 120),
+    detectedRisk: normalizeRisk(raw.detectedRisk)
+  };
+}
+
+function sortReflections(items) {
+  return [...items].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
 }
 
 const CLINICAL_KB = [
@@ -728,6 +792,120 @@ app.get('/treatments/all', (_, res) => {
   } catch (error) {
     return res.status(500).json({
       error: 'Fallo obteniendo tratamientos globales',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.post('/checkins/sync-student', (req, res) => {
+  try {
+    const studentName = normalizeStudentName(req.body?.studentName);
+    const checkIns = Array.isArray(req.body?.checkIns)
+      ? req.body.checkIns.map(sanitizeCheckIn).filter(Boolean)
+      : [];
+
+    if (!studentName) {
+      return res.status(400).json({ error: 'studentName es requerido' });
+    }
+
+    checkInsByStudent.set(studentName, sortCheckIns(checkIns));
+    return res.json({ ok: true, studentName, count: checkIns.length });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo sincronizando check-ins del estudiante',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.get('/checkins/by-student', (req, res) => {
+  try {
+    const studentName = normalizeStudentName(req.query?.studentName);
+    if (!studentName) {
+      return res.status(400).json({ error: 'studentName es requerido' });
+    }
+
+    return res.json({
+      ok: true,
+      studentName,
+      checkIns: checkInsByStudent.get(studentName) || []
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo obteniendo check-ins del estudiante',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.get('/checkins/all', (_, res) => {
+  try {
+    const students = Array.from(checkInsByStudent.entries()).map(([studentName, checkIns]) => ({
+      studentName,
+      checkIns
+    }));
+
+    return res.json({ ok: true, students });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo obteniendo check-ins globales',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.post('/reflections/sync-student', (req, res) => {
+  try {
+    const studentName = normalizeStudentName(req.body?.studentName);
+    const reflections = Array.isArray(req.body?.reflections)
+      ? req.body.reflections.map(sanitizeReflection).filter(Boolean)
+      : [];
+
+    if (!studentName) {
+      return res.status(400).json({ error: 'studentName es requerido' });
+    }
+
+    reflectionsByStudent.set(studentName, sortReflections(reflections));
+    return res.json({ ok: true, studentName, count: reflections.length });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo sincronizando reflexiones del estudiante',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.get('/reflections/by-student', (req, res) => {
+  try {
+    const studentName = normalizeStudentName(req.query?.studentName);
+    if (!studentName) {
+      return res.status(400).json({ error: 'studentName es requerido' });
+    }
+
+    return res.json({
+      ok: true,
+      studentName,
+      reflections: reflectionsByStudent.get(studentName) || []
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo obteniendo reflexiones del estudiante',
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.get('/reflections/all', (_, res) => {
+  try {
+    const students = Array.from(reflectionsByStudent.entries()).map(([studentName, reflections]) => ({
+      studentName,
+      reflections
+    }));
+
+    return res.json({ ok: true, students });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Fallo obteniendo reflexiones globales',
       detail: error instanceof Error ? error.message : String(error)
     });
   }
