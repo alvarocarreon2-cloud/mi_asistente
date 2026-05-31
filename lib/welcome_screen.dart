@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'main.dart';
+import 'school_mental_health_flow.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -42,7 +42,10 @@ class _WelcomeScreenState extends State<WelcomeScreen>
         _animationController.reverse().then((_) {
           Navigator.of(context).pushReplacement(
             MaterialPageRoute(
-              builder: (context) => HomeScreen(nombreUsuario: nombreUsuario),
+              builder: (context) => const SchoolMentalHealthFlow(
+                isDarkMode: false,
+                onToggleThemeMode: _noop,
+              ),
             ),
           );
         });
@@ -57,11 +60,16 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     _animationController.reverse().then((_) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (context) => HomeScreen(nombreUsuario: nombreUsuario),
+          builder: (context) => const SchoolMentalHealthFlow(
+            isDarkMode: false,
+            onToggleThemeMode: _noop,
+          ),
         ),
       );
     });
   }
+
+  static void _noop() {}
 
   @override
   void dispose() {

@@ -1,0 +1,23 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="brandLavender" x1="190" y1="180" x2="865" y2="840" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D2A5FF"/>
+      <stop offset="0.55" stop-color="#AE7AF2"/>
+      <stop offset="1" stop-color="#9965E6"/>
+    </linearGradient>
+    <filter id="softGlow" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" fill="#000000"/>
+
+  <g filter="url(#softGlow)" opacity="0.18">
+    <text x="330" y="740" text-anchor="middle" font-size="540" font-family="Times New Roman, Georgia, serif" fill="#A98AF3">K</text>
+    <path d="M453 224C629 193 797 252 891 386C965 491 982 629 938 747C900 849 825 915 725 952C674 971 620 981 563 981C673 965 763 916 820 833C881 744 896 631 865 529C827 404 723 302 588 258C544 244 499 235 453 224Z" fill="#A98AF3"/>
+    <path d="M696 383L724 462L804 490L724 518L696 597L668 518L588 490L668 462L696 383Z" fill="#A98AF3"/>
+  </g>
+  <text x="330" y="740" text-anchor="middle" font-size="540" font-family="Times New Roman, Georgia, serif" fill="url(#brandLavender)">K</text>
+  <path d="M453 224C629 193 797 252 891 386C965 491 982 629 938 747C900 849 825 915 725 952C674 971 620 981 563 981C673 965 763 916 820 833C881 744 896 631 865 529C827 404 723 302 588 258C544 244 499 235 453 224Z" fill="url(#brandLavender)"/>
+  <path d="M710 388L738 468L818 496L738 524L710 604L682 524L602 496L682 468L710 388Z" fill="url(#brandLavender)"/>
+</svg>

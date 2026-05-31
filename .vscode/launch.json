@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Flutter (AI Backend Public)",
+      "request": "launch",
+      "type": "dart",
+      "flutterMode": "debug",
+      "toolArgs": [
+        "--dart-define=AI_BACKEND_URL=https://mi-app-ai-backend.onrender.com"
+      ]
+    }
+  ]
+}
